@@ -1,0 +1,15 @@
+../../../../../../../../../Users/arikarchmer/Library/Caches/com.apple.python/private/var/folders/ld/3c0sc74x4wd8gg6n2cm0n94w0000gn/T/pip-target-fmrt9fwt/lib/python/sherpa_onnx/__main__.cpython-39.pyc,,
+../../../../../../../../../Users/arikarchmer/Library/Caches/com.apple.python/private/var/folders/ld/3c0sc74x4wd8gg6n2cm0n94w0000gn/T/pip-target-fmrt9fwt/lib/python/sherpa_onnx/_info.cpython-39.pyc,,
+sherpa_onnx/__main__.py,sha256=9mZormj34VT8j7x2H766JDOKS6Qd7LLBnFUb4m6QUW8,1206
+sherpa_onnx/_info.py,sha256=UII-ogyqK28D77gkKGJ34izZLQq_iUwAZ3kuRBOUPsw,611
+sherpa_onnx/include/sherpa-onnx/c-api/c-api.h,sha256=Q3sSeQR4dxZ9j63HSmDUfz31FNcD_awcG2hR2pvC_bQ,160309
+sherpa_onnx/include/sherpa-onnx/c-api/cxx-api.h,sha256=QxFw18NL8VR2Hw0VGYSjuJczQkRNT5PHA36nQFMTrt4,55620
+sherpa_onnx/lib/libonnxruntime.1.24.4.dylib,sha256=hyUz8TDxg5pbwBeI3bT3XIOhiXY0QboReHiO2WVEkok,35418600
+sherpa_onnx/lib/libonnxruntime.dylib,sha256=hyUz8TDxg5pbwBeI3bT3XIOhiXY0QboReHiO2WVEkok,35418600
+sherpa_onnx/lib/libsherpa-onnx-c-api.dylib,sha256=IdM2-1Dd4JlKpKbR1kc1cUJkOmovtOM_SLqwo2uECqQ,4029240
+sherpa_onnx/lib/libsherpa-onnx-cxx-api.dylib,sha256=rFjobigz3M273AnFpPf1WyaErH2qgr7AK4FPj7hHJuE,132800
+sherpa_onnx_core-1.13.1.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+sherpa_onnx_core-1.13.1.dist-info/METADATA,sha256=_Z3Fh2vKIOMLIpgxBqJE6ZMQ-bzbVFbWVG8FGU6MIZw,518
+sherpa_onnx_core-1.13.1.dist-info/RECORD,,
+sherpa_onnx_core-1.13.1.dist-info/WHEEL,sha256=TExxCn6JT3jffq928GqKdeeup1D0bQkIgZkkCwBUsH0,106
+sherpa_onnx_core-1.13.1.dist-info/top_level.txt,sha256=ErNIs96YHtSuqi0sdtG1f68oYeCqrKIMzDqAobB2Sow,12
