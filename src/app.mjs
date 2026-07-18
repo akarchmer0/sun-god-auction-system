@@ -145,8 +145,8 @@ function render() {
     <div class="shell">
       <header class="topbar">
         <button class="brand" data-action="setup" aria-label="Open league setup">
-          <span class="brand-mark">G</span>
-          <span><strong>Gavel</strong><small>AI AUCTIONEER</small></span>
+          <span class="sun-mark">${sunLogo()}</span>
+          <span><strong>Sun God</strong><small>AUCTION SYSTEMS</small></span>
         </button>
         <div class="room-state">
           <span class="live-dot ${["open", "once", "twice"].includes(state.auction.phase) ? "is-live" : ""}"></span>
@@ -276,8 +276,8 @@ function playerCard(player, highBidder) {
     <div class="bid-display ${state.auction.amount ? "has-bid" : ""}">
       <span class="bid-label">${state.auction.amount ? "CURRENT BID" : "OPENING BID"}</span>
       <div class="bid-number"><sup>$</sup>${state.auction.amount || 1}</div>
-      <div class="high-bidder">
-        ${highBidder ? `<i style="background:${highBidder.color}"></i><span>${escapeHtml(highBidder.name)}<small>${escapeHtml(highBidder.manager)}</small></span>` : `<span>Waiting for the room</span>`}
+      <div class="high-bidder ${highBidder ? "has-leader" : ""}" ${highBidder ? `style="--leader:${highBidder.color}"` : ""}>
+        ${highBidder ? `<span class="leader-label">CURRENT WINNING TEAM</span><i></i><span class="leader-copy"><strong>${escapeHtml(highBidder.name)}</strong><small>Managed by ${escapeHtml(highBidder.manager)}</small></span>` : `<span class="waiting-copy">Waiting for the room</span>`}
       </div>
     </div>
     <div class="countdown-state phase-${state.auction.phase}">
@@ -293,7 +293,7 @@ function playerCard(player, highBidder) {
 }
 
 function emptyStage() {
-  return `<div class="empty-stage"><span class="brand-mark large">G</span><span class="eyebrow">THE ROOM IS READY</span><h1>Nominate the first player</h1><p>Choose a player from the board to begin the draft.</p></div>`;
+  return `<div class="empty-stage"><span class="sun-mark large">${sunLogo()}</span><span class="eyebrow">THE ROOM IS READY</span><h1>Nominate the first player</h1><p>Choose a player from the board to begin the draft.</p></div>`;
 }
 
 function queueRow(player, index) {
@@ -385,7 +385,7 @@ function cloudInterpreterCard() {
     ? cloudInterpreter.message
     : active
       ? `OpenAI ${cloudInterpreter.model} is correcting likely transcription mistakes before a bid is applied.`
-      : "Cloud interpretation is off. Gavel will use its on-device phrase parser instead.";
+      : "Cloud interpretation is off. Sun God will use its on-device phrase parser instead.";
   return `<div class="cloud-interpreter-card ${active ? "is-active" : ""}">
     <div><span class="eyebrow">CLOUD BID INTERPRETER</span><strong>${active ? "ON · READY" : ready ? "OFF" : "NOT CONFIGURED"}</strong><p>${escapeHtml(summary)}</p></div>
     <button type="button" class="secondary-action compact" data-action="toggle-cloud-interpreter" ${ready ? "" : "disabled"}>${active ? "Turn off" : "Turn on"}</button>
@@ -769,7 +769,7 @@ async function refreshCloudInterpreter() {
       ...cloudInterpreter,
       status: "unavailable",
       model: null,
-      message: "Cloud bid interpretation needs Gavel's local server."
+      message: "Cloud bid interpretation needs Sun God's local server."
     };
   }
   if (voiceDialogOpen) render();
@@ -791,7 +791,7 @@ async function refreshTranscriptionService() {
       ...transcriptionService,
       status: "unavailable",
       model: null,
-      message: "OpenAI live transcription needs Gavel's local server.",
+      message: "OpenAI live transcription needs Sun God's local server.",
       error: null
     };
   }
@@ -960,15 +960,15 @@ async function toggleCamera() {
 }
 
 function printBidCards() {
-  const printWindow = window.open("", "gavel-bid-cards");
-  if (!printWindow) throw new Error("Allow pop-ups for localhost so Gavel can open the printable cards.");
+  const printWindow = window.open("", "sun-god-bid-cards");
+  if (!printWindow) throw new Error("Allow pop-ups for localhost so Sun God can open the printable cards.");
   const cards = state.teams.map((team) => {
     const markerId = markerIdForTeam(state.teams, team.id);
-    return `<article class="card"><div class="marker">${generateArucoCardSvg(markerId)}</div><span>GAVEL BID CARD · #${markerId}</span><h1>${escapeHtml(team.manager)}</h1><p>${escapeHtml(team.name)}</p><small>Hold the black-and-white marker flat toward the laptop camera.</small></article>`;
+    return `<article class="card"><div class="marker">${generateArucoCardSvg(markerId)}</div><span>SUN GOD BID CARD · #${markerId}</span><h1>${escapeHtml(team.manager)}</h1><p>${escapeHtml(team.name)}</p><small>Hold the black-and-white marker flat toward the laptop camera.</small></article>`;
   });
   const sheets = [];
   for (let index = 0; index < cards.length; index += 2) sheets.push(`<section class="sheet">${cards.slice(index, index + 2).join("")}</section>`);
-  printWindow.document.write(`<!doctype html><html><head><title>Gavel bid cards</title><style>
+  printWindow.document.write(`<!doctype html><html><head><title>Sun God bid cards</title><style>
     @page { size: letter landscape; margin: .3in; }
     * { box-sizing: border-box; }
     body { margin: 0; color: #111; font-family: Arial, sans-serif; }
@@ -1140,4 +1140,14 @@ function icon(name) {
     cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>'
   };
   return `<svg class="icon icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+}
+
+function sunLogo() {
+  return `<svg class="sun-logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <g stroke="currentColor" stroke-width="3" stroke-linecap="round">
+      <path d="M32 3v8M32 53v8M3 32h8M53 32h8M11.5 11.5l5.7 5.7M46.8 46.8l5.7 5.7M52.5 11.5l-5.7 5.7M17.2 46.8l-5.7 5.7"/>
+    </g>
+    <circle cx="32" cy="32" r="16.5" fill="#dba52e" stroke="currentColor" stroke-width="3"/>
+    <path d="M24.5 29c2-2 4-2 6 0M33.5 29c2-2 4-2 6 0M26 38c3.7 2.7 8.3 2.7 12 0" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>`;
 }

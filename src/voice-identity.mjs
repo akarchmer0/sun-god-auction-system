@@ -302,7 +302,7 @@ class LocalAudioCapture {
 }
 
 async function requestEmbedding(samples) {
-  if (samples.length < 19200) throw new Error("Keep speaking for at least two seconds so Gavel can identify the bidder.");
+  if (samples.length < 19200) throw new Error("Keep speaking for at least two seconds so Sun God can identify the bidder.");
   const response = await fetch("/api/voice/embed", {
     method: "POST",
     headers: {

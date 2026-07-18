@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local Sherpa-ONNX worker used by Gavel's browser server.
+"""Local Sherpa-ONNX worker used by Sun God's browser server.
 
 It accepts newline-delimited JSON on stdin and returns a speaker embedding for
 each float32 PCM request. The process never writes recordings or embeddings to
@@ -49,7 +49,7 @@ def compute_embedding(extractor: sherpa_onnx.SpeakerEmbeddingExtractor, request:
     raw = base64.b64decode(request["pcmBase64"], validate=True)
     samples = np.frombuffer(raw, dtype=np.float32)
     if len(samples) < int(sample_rate * MIN_SECONDS):
-        raise ValueError("Keep speaking for at least two seconds so Gavel can identify the bidder.")
+        raise ValueError("Keep speaking for at least two seconds so Sun God can identify the bidder.")
     samples = np.ascontiguousarray(np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0))
     stream = extractor.create_stream()
     stream.accept_waveform(sample_rate=sample_rate, waveform=samples)

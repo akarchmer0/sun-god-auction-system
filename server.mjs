@@ -65,7 +65,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, "::", () => {
-  console.log(`Gavel is running at http://localhost:${port}`);
+  console.log(`Sun God Auction Systems is running at http://localhost:${port}`);
 });
 
 function createSpeakerWorker() {
@@ -194,7 +194,7 @@ function cloudInterpreterStatus() {
     model: openAiApiKey ? auctionIntentModel : null,
     message: openAiApiKey
       ? "Cloud bid interpretation is ready."
-      : "Add OPENAI_API_KEY to .env, then restart Gavel to enable cloud bid interpretation."
+      : "Add OPENAI_API_KEY to .env, then restart Sun God to enable cloud bid interpretation."
   };
 }
 
@@ -204,12 +204,12 @@ function transcriptionStatus() {
     model: openAiApiKey ? transcriptionModel : null,
     message: openAiApiKey
       ? "OpenAI live transcription is ready."
-      : "Add OPENAI_API_KEY to .env, then restart Gavel to enable OpenAI live transcription."
+      : "Add OPENAI_API_KEY to .env, then restart Sun God to enable OpenAI live transcription."
   };
 }
 
 async function createRealtimeTranscriptionSession() {
-  if (!openAiApiKey) throw apiError("OpenAI live transcription is not configured. Add OPENAI_API_KEY to .env, then restart Gavel.", 503);
+  if (!openAiApiKey) throw apiError("OpenAI live transcription is not configured. Add OPENAI_API_KEY to .env, then restart Sun God.", 503);
   const session = {
     type: "transcription",
     audio: {
@@ -235,7 +235,7 @@ async function createRealtimeTranscriptionSession() {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.value) {
-      if (response.status === 401) throw apiError("OpenAI could not authenticate the API key. Check OPENAI_API_KEY and restart Gavel.", 503);
+      if (response.status === 401) throw apiError("OpenAI could not authenticate the API key. Check OPENAI_API_KEY and restart Sun God.", 503);
       if (response.status === 429) throw apiError("OpenAI is temporarily rate-limiting live transcription. Try turning the mic on again in a moment.", 503);
       throw apiError("OpenAI could not start a live transcription session. Check that your API project can use Realtime transcription.", 503);
     }
@@ -247,7 +247,7 @@ async function createRealtimeTranscriptionSession() {
 }
 
 async function interpretAuctionSpeech(payload) {
-  if (!openAiApiKey) throw apiError("Cloud bid interpretation is not configured. Add OPENAI_API_KEY to .env, then restart Gavel.", 503);
+  if (!openAiApiKey) throw apiError("Cloud bid interpretation is not configured. Add OPENAI_API_KEY to .env, then restart Sun God.", 503);
   const transcript = String(payload?.transcript || "").trim().slice(0, 700);
   if (!transcript) throw apiError("A spoken transcript is required.", 400);
 
@@ -334,15 +334,15 @@ async function requestOpenAiIntent({ transcript, teams, currentBid, increment, p
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      if (response.status === 401) throw apiError("OpenAI could not authenticate the API key. Check OPENAI_API_KEY and restart Gavel.", 503);
-      if (response.status === 429) throw apiError("OpenAI is temporarily rate-limiting bid interpretation. Gavel will keep using its local bid parser.", 503);
-      throw apiError("OpenAI could not interpret that bid right now. Gavel will keep using its local bid parser.", 503);
+      if (response.status === 401) throw apiError("OpenAI could not authenticate the API key. Check OPENAI_API_KEY and restart Sun God.", 503);
+      if (response.status === 429) throw apiError("OpenAI is temporarily rate-limiting bid interpretation. Sun God will keep using its local bid parser.", 503);
+      throw apiError("OpenAI could not interpret that bid right now. Sun God will keep using its local bid parser.", 503);
     }
     return payload;
   } catch (error) {
     if (error?.status) throw error;
-    if (error?.name === "AbortError") throw apiError("Cloud bid interpretation took too long. Gavel will keep using its local bid parser.", 503);
-    throw apiError("Cloud bid interpretation is unavailable. Gavel will keep using its local bid parser.", 503);
+    if (error?.name === "AbortError") throw apiError("Cloud bid interpretation took too long. Sun God will keep using its local bid parser.", 503);
+    throw apiError("Cloud bid interpretation is unavailable. Sun God will keep using its local bid parser.", 503);
   } finally {
     clearTimeout(timeout);
   }
@@ -373,7 +373,7 @@ function loadLocalEnv(directory) {
   const envPath = resolve(directory, ".env");
   let source = "";
   try { source = readFileSync(envPath, "utf8"); }
-  catch (error) { if (error?.code !== "ENOENT") console.warn("Could not read Gavel's .env file."); return; }
+  catch (error) { if (error?.code !== "ENOENT") console.warn("Could not read Sun God's .env file."); return; }
   for (const line of source.split(/\r?\n/)) {
     const match = line.match(/^\s*(?:export\s+)?(OPENAI_API_KEY|GAVEL_INTENT_MODEL|GAVEL_TRANSCRIPTION_MODEL)\s*=\s*(.*?)\s*$/);
     if (!match || process.env[match[1]]) continue;
