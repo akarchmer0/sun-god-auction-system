@@ -47,11 +47,11 @@ export const teamPalette = [
   "#ae73bd"
 ];
 
-export function makeTeams(count = 6, budget = 200) {
+export function makeTeams(count = 8, budget = 200) {
   return Array.from({ length: count }, (_, index) => ({
     id: `team-${index + 1}`,
-    name: ["Fourth & Long", "Sunday Scaries", "Gridiron Club", "The Audible", "Red Zone", "Waiver Wire"][index] || `Team ${index + 1}`,
-    manager: ["Alex", "Jordan", "Sam", "Taylor", "Casey", "Morgan"][index] || `Manager ${index + 1}`,
+    name: ["Fourth & Long", "Sunday Scaries", "Gridiron Club", "The Audible", "Red Zone", "Waiver Wire", "Goal Line", "Two Minute Drill"][index] || `Team ${index + 1}`,
+    manager: ["Alex", "Jordan", "Sam", "Taylor", "Casey", "Morgan", "Riley", "Jamie"][index] || `Manager ${index + 1}`,
     color: teamPalette[index % teamPalette.length],
     budget,
     roster: []

@@ -71,11 +71,15 @@ button { color: inherit; }
 .panel-heading h2, .bidder-heading h2 { margin: 4px 0 0; font-size: 15px; letter-spacing: -.02em; }
 .eyebrow { color: var(--muted); font: 500 9px/1 "DM Mono", monospace; letter-spacing: .15em; }
 .privacy-chip { border: 1px solid #38463b; color: #7baa83; background: #1a251d; padding: 5px 7px; border-radius: 4px; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.marker-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.marker-tools .text-button { font-size: 8px; }
+.marker-tools .icon { width: 12px; }
 
 .camera-panel { grid-area: camera; padding-bottom: 20px; }
-.video-wrap { margin: 0 18px; aspect-ratio: 4/3; max-height: 370px; overflow: hidden; background: #121210; border: 1px solid #2c2c29; border-radius: 8px; position: relative; }
+.video-wrap { margin: 0 18px; aspect-ratio: 16/9; max-height: 370px; overflow: hidden; background: #121210; border: 1px solid #2c2c29; border-radius: 8px; position: relative; }
 .video-wrap video { width: 100%; height: 100%; display: none; object-fit: cover; transform: scaleX(-1); filter: saturate(.72) contrast(1.06); }
 .video-wrap.camera-active video { display: block; }
+.marker-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .video-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px; color: #77776f; }
 .camera-active .video-empty { display: none; }
 .video-empty .icon { width: 28px; height: 28px; margin-bottom: 14px; }
@@ -89,6 +93,12 @@ button { color: inherit; }
 .camera-status { position: absolute; top: 10px; left: 10px; display: flex; align-items: center; gap: 6px; background: rgba(10,10,9,.7); backdrop-filter: blur(8px); padding: 5px 7px; border-radius: 4px; color: #c5c3bc; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
 .camera-status i { width: 5px; height: 5px; border-radius: 50%; background: #67675f; }
 .camera-active .camera-status i { background: var(--green); }
+.marker-strip { min-height: 33px; margin: 9px 18px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.marker-empty { color: #696961; font: 500 8px/1.4 "DM Mono", monospace; }
+.marker-empty.is-active { color: var(--orange-soft); }
+.marker-chip { height: 24px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid color-mix(in srgb, var(--marker), #333 60%); border-radius: 5px; padding: 0 7px; background: #1d1d1a; color: #bdbbb3; font: 500 8px/1 "DM Mono", monospace; }
+.marker-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--marker); }
+.marker-chip.is-unknown { --marker: #8a6458; color: #a98275; }
 .listener-card { margin: 13px 18px 0; border: 1px solid #30302c; background: #1c1c19; padding: 13px; border-radius: 7px; display: flex; align-items: center; gap: 12px; }
 .listener-card.is-listening { border-color: rgba(240,93,35,.3); background: rgba(240,93,35,.035); }
 .listener-card small { color: #76766e; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .1em; }
@@ -193,6 +203,7 @@ button { color: inherit; }
 .team-money { text-align: right; }
 .team-money strong { font: 500 12px/1 "DM Mono", monospace; }
 .armed-label { position: absolute; right: 9px; bottom: 4px; color: color-mix(in srgb, var(--team), white 10%); font: 500 6px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.marker-badge { position: absolute; left: 8px; bottom: 4px; color: #65655e; font: 500 7px/1 "DM Mono", monospace; }
 .keyboard-hint { margin-top: 10px; color: #5f5f58; font-size: 8px; text-align: center; }
 .keyboard-hint kbd { font: inherit; color: #898880; border: 1px solid #383833; border-radius: 3px; padding: 1px 4px; }
 .keyboard-hint span { padding: 0 6px; }
@@ -270,6 +281,19 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .voice-candidates button i { width: 6px; height: 18px; border-radius: 3px; }
 .voice-candidates button small { color: #8e7e76; }
 .voice-candidates button.reject { color: #988a83; background: transparent; }
+
+.visual-tie-confirmation { position: fixed; z-index: 44; top: 83px; left: 50%; width: min(880px, calc(100vw - 40px)); transform: translateX(-50%); display: grid; grid-template-columns: auto minmax(160px, 1fr) auto; align-items: center; gap: 16px; padding: 13px 15px; border: 1px solid #8a6138; border-radius: 9px; background: #282116; box-shadow: 0 18px 55px rgba(0,0,0,.55); }
+.visual-tie-confirmation > div:first-child { display: flex; align-items: center; gap: 10px; }
+.visual-tie-confirmation > div:first-child .icon { color: #e9aa61; }
+.visual-tie-confirmation span small, .visual-tie-confirmation span strong { display: block; }
+.visual-tie-confirmation span small { color: #e9aa61; font: 500 7px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.visual-tie-confirmation span strong { margin-top: 5px; font-size: 11px; }
+.visual-tie-confirmation > p { margin: 0; color: #c0ad91; font-size: 10px; }
+.visual-tie-actions { display: flex; gap: 6px; }
+.visual-tie-actions button { height: 32px; display: flex; align-items: center; gap: 6px; border: 1px solid #5e4d37; border-radius: 5px; padding: 0 9px; background: #342b1f; color: #d6c9b5; font-size: 9px; cursor: pointer; }
+.visual-tie-actions button:hover { border-color: #e9aa61; }
+.visual-tie-actions button i { width: 6px; height: 18px; border-radius: 3px; }
+.visual-tie-actions button.reject { color: #9b8e7b; background: transparent; }
 
 @keyframes wave { from { height: 4px; } to { height: calc(7px + (var(--i) % 5) * 3px); } }
 @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(240,93,35,0); } }

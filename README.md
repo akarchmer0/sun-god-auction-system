@@ -1,6 +1,6 @@
 # Gavel
 
-Gavel is a local-first fantasy football auction draft room with a voice auctioneer, microphone bid commands, a room-camera preview, salary-cap enforcement, rosters, and a reversible sale ledger.
+Gavel is a local-first fantasy football auction draft room with a voice auctioneer, microphone bid commands, on-device ArUco bid-card recognition, salary-cap enforcement, rosters, and a reversible sale ledger.
 
 ## Run it
 
@@ -15,6 +15,20 @@ Then open `http://localhost:4173` in Chrome. Camera and microphone access work o
 No API key is required for the core draft room or the browser auctioneer voice. The optional live microphone listener uses OpenAI, while every auction action still has a button or keyboard fallback.
 
 Automatic manager identification uses the included open-source Sherpa-ONNX runtime and a local speaker-embedding model. Gavel records a short clip for enrollment or a spoken bid, sends it only to its own `localhost` helper, and compares the resulting embedding to voiceprints held in the browser. Neither recordings nor voiceprints are sent to a remote service.
+
+## ArUco card bidding
+
+The camera is now a complete bid input, not just a preview. Gavel assigns ArUco marker IDs in team order: card `#0` belongs to the first manager, card `#1` to the second, and so on through `#11`.
+
+1. Finish the team order in **League setup**.
+2. Click **Print cards** in the visual-bidding panel. Gavel creates two large cards per landscape letter sheet with the manager and team already labeled.
+3. Put the MacBook where its camera can see every bidder and click **Enable card bidding**.
+4. A manager holds their card flat toward the camera to bid the next legal increment. The colored outline and manager label confirm the card was found.
+5. Lower the card for at least half a second before using it again. A held card cannot accidentally place repeated bids.
+
+The detector downsizes camera frames to 640 pixels and scans at 8 FPS. A marker must survive two sightings before it counts, which filters brief false detections while keeping the load modest enough for a MacBook Air. Detection uses the `ARUCO_MIP_36h12` dictionary from the MIT-licensed [js-aruco2](https://github.com/damianofalcioni/js-aruco2) implementation, vendored into the app so it does not need a CDN or internet connection.
+
+When multiple stable cards arrive within the same 300 ms window, Gavel pauses the countdown and announces a tie at the next bid amount. Only the tied managers are eligible for the runoff: they lower their cards, then raise again. If the runoff ties again, they can repeat it or the laptop operator can award the bid using the on-screen buttons.
 
 ## OpenAI voice pipeline
 
@@ -37,7 +51,7 @@ The permanent API key is read only by `server.mjs` on the Mac; it is never deliv
 
 1. Click a player in **On deck** to nominate them.
 2. Click **Start auction**.
-3. Click a team to place a bid, or arm a team and say “bid.” You can also say a team/manager name and a numeric bid, such as “Alex bids 12.”
+3. Raise a manager's ArUco card, click a team, or arm a team and say “bid.” You can also say a team/manager name and a numeric bid, such as “Alex bids 12.”
 4. The automatic countdown gives the room eight seconds before “going once,” then five seconds before “going twice,” and just over four seconds before sale. Any valid bid resets it.
 5. Completed sales update the team's budget and roster. **Undo last** reverses the most recent sale.
 
@@ -69,14 +83,16 @@ The included values and player board are demo data, not live rankings.
 ## Architecture notes
 
 - `src/domain.mjs` is the deterministic auction engine. Voice and camera cannot mutate budgets directly.
-- `src/app.mjs` contains browser device adapters and the room UI.
+- `src/app.mjs` coordinates browser devices, visual/voice bid decisions, and the room UI.
+- `src/aruco-vision.mjs` downsizes camera frames, runs local marker detection, and draws the live marker overlay.
+- `src/vision-bidding.mjs` owns marker/team mapping, stable-card latching, and simultaneous-bid classification.
 - `src/realtime-transcriber.mjs` captures live speech, detects utterance boundaries, and sends 24 kHz PCM to an OpenAI Realtime transcription session using a short-lived token.
 - `server.mjs` mints short-lived OpenAI Realtime session tokens and interprets bid transcripts; the permanent API key remains server-side.
 - `src/auction-intent.mjs` validates cloud results before the browser uses them.
 - `src/voice-identity.mjs` owns local enrollment, audio capture, IndexedDB voiceprint storage, and confidence-based identity resolution.
 - `speaker_worker.py` keeps the included Sherpa-ONNX model warm and returns embeddings through the local web server; it does not save recordings or profiles.
 - Draft state is persisted in `localStorage`.
-- The camera feed and speaker-identity voiceprints stay on the Mac. Detected microphone speech is sent to OpenAI only while live transcription is enabled.
+- The camera feed, marker detections, and speaker-identity voiceprints stay on the Mac. Detected microphone speech is sent to OpenAI only while live transcription is enabled.
 - A production auctioneer voice provider can be added behind the `speak()` adapter.
 
 ## Test
@@ -85,4 +101,4 @@ The included values and player board are demo data, not live rankings.
 npm test
 ```
 
-The tests cover bid increments, reserve-budget rules, countdown transitions, completed sales, undo, no-bid queue rotation, strong voice matches, ambiguous speakers, and stale/low-confidence audio.
+The tests cover bid increments, reserve-budget rules, countdown transitions, completed sales, undo, no-bid queue rotation, ArUco mapping/latching/ties, strong voice matches, ambiguous speakers, and stale/low-confidence audio.

@@ -3,6 +3,14 @@ import { parseSpokenBid } from "./bid-voice.mjs";
 import { hasPotentialBidSignal, normalizeCloudAuctionIntent } from "./auction-intent.mjs";
 import { RealtimeTranscriber } from "./realtime-transcriber.mjs";
 import { VoiceIdentityService } from "./voice-identity.mjs";
+import { ArucoVision, generateArucoCardSvg } from "./aruco-vision.mjs";
+import {
+  VISUAL_BID_WINDOW_MS,
+  classifyVisualBidBatch,
+  markerIdForTeam,
+  nextVisualBidAmount,
+  teamForMarkerId
+} from "./vision-bidding.mjs";
 import {
   createDraft,
   nominatePlayer,
@@ -32,6 +40,8 @@ let lastTranscript = "Say “bid” or use a team button";
 let notice = null;
 let voiceDialogOpen = false;
 let pendingVoiceBid = null;
+let pendingVisualTie = null;
+let visualBidWindow = null;
 let cloudInterpreter = {
   status: "checking",
   enabled: localStorage.getItem(CLOUD_INTERPRETER_STORAGE_KEY) !== "false",
@@ -54,6 +64,32 @@ let voiceState = {
   isRecognizing: false,
   latestScores: {}
 };
+let visionState = {
+  status: "standby",
+  visibleMarkerIds: [],
+  detectionMs: 0,
+  error: null
+};
+const markerVision = new ArucoVision({
+  onDetections: (markers, stats) => {
+    visionState.visibleMarkerIds = [...new Set(markers.map((marker) => marker.id))].sort((a, b) => a - b);
+    visionState.detectionMs = stats.detectionMs;
+    refreshVisionIndicators();
+  },
+  onMarkerRaised: (markerIds, at) => handleMarkerRaises(markerIds, at),
+  onStateChange: (snapshot) => {
+    visionState = { ...visionState, ...snapshot };
+    refreshVisionIndicators();
+    if (snapshot.status === "error") {
+      showNotice({ kind: "error", message: snapshot.error || "Marker detection stopped." });
+    }
+  },
+  labelForMarker: (markerId) => {
+    const team = teamForMarkerId(state.teams, markerId);
+    return team ? `${team.manager} · #${markerId}` : `Unknown #${markerId}`;
+  },
+  colorForMarker: (markerId) => teamForMarkerId(state.teams, markerId)?.color || "#f05d23"
+});
 const voiceIdentity = new VoiceIdentityService({
   onStateChange: (snapshot) => {
     const structuralChange = snapshot.status !== voiceState.status
@@ -122,7 +158,7 @@ function render() {
         <div class="device-controls">
           <button class="device-button ${micEnabled ? "is-on" : ""}" data-action="microphone" title="Toggle OpenAI bid listening">${icon("mic")} <span>${microphoneLabel()}</span></button>
           <button class="device-button voice-id-button ${voiceState.isRecognizing ? "is-on" : ""}" data-action="voice-setup" title="Enroll and manage manager voices">${icon("fingerprint")} <span id="voice-id-label">${voiceBadgeLabel()}</span></button>
-          <button class="device-button ${cameraEnabled ? "is-on" : ""}" data-action="camera" title="Toggle room camera">${icon("camera")} <span>${cameraEnabled ? "Camera on" : "Camera off"}</span></button>
+          <button class="device-button ${cameraEnabled ? "is-on" : ""}" data-action="camera" title="Toggle ArUco card bidding">${icon("camera")} <span>${cameraEnabled ? "Cards on" : "Cards off"}</span></button>
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="Toggle auctioneer voice">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
@@ -130,31 +166,31 @@ function render() {
 
       ${notice ? `<div class="notice ${notice.kind}"><span>${escapeHtml(notice.message)}</span><button data-action="dismiss-notice">×</button></div>` : ""}
       ${pendingVoiceBid ? voiceConfirmation() : ""}
+      ${pendingVisualTie ? visualTieConfirmation() : ""}
 
       <main class="draft-grid">
         <section class="camera-panel panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">ROOM VIEW</span><h2>Bidder camera</h2></div>
-            <span class="privacy-chip">ON DEVICE</span>
+            <div><span class="eyebrow">VISUAL BIDDING</span><h2>ArUco card scanner</h2></div>
+            <div class="marker-tools"><span class="privacy-chip">ON DEVICE</span><button class="text-button" data-action="print-bid-cards">${icon("print")} Print cards</button></div>
           </div>
           <div class="video-wrap ${cameraEnabled ? "camera-active" : ""}">
             <video id="room-video" autoplay muted playsinline></video>
+            <canvas id="marker-overlay" class="marker-overlay" aria-hidden="true"></canvas>
             <div class="video-empty">
               ${icon("camera")}
-              <strong>Room camera is off</strong>
-              <span>Use it as a visual aid for who raised the bid.</span>
-              <button data-action="camera">Enable camera</button>
+              <strong>Card scanner is off</strong>
+              <span>Print one marker per manager, then point the camera at the room.</span>
+              <button data-action="camera">Enable card bidding</button>
             </div>
-            <div class="seat-overlay">
-              <span>LEFT</span><span>CENTER</span><span>RIGHT</span>
-            </div>
-            <div class="camera-status"><i></i>${cameraEnabled ? "LOCAL PREVIEW" : "STANDBY"}</div>
+            <div class="camera-status"><i></i><span id="vision-status-label">${visionStatusLabel()}</span></div>
           </div>
+          <div id="marker-status" class="marker-strip">${markerStatusContent()}</div>
           <div class="listener-card ${micEnabled ? "is-listening" : ""}">
             <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>
             <div><small>${micEnabled ? "OPENAI HEARD IN THE ROOM" : "VOICE INPUT"}</small><p id="live-transcript">${escapeHtml(lastTranscript)}</p></div>
           </div>
-          <p class="camera-note">Camera stays in this browser. The microphone stream goes to OpenAI only while listening; local voiceprints still identify managers automatically.</p>
+          <p class="camera-note">Hold a card up to bid the next legal amount, then lower it before bidding again. Frames are analyzed locally at low resolution; camera video never leaves this Mac.</p>
         </section>
 
         <section class="auction-stage">
@@ -188,7 +224,7 @@ function render() {
           <div class="team-grid">
             ${state.teams.map((team, index) => teamBidButton(team, index)).join("")}
           </div>
-          <div class="keyboard-hint"><kbd>1</kbd>–<kbd>${Math.min(9, state.teams.length)}</kbd> quick bid <span>•</span> Click a team once to arm it for a spoken “bid”</div>
+          <div class="keyboard-hint"><kbd>1</kbd>–<kbd>${Math.min(9, state.teams.length)}</kbd> quick bid <span>•</span> ArUco cards <kbd>#0</kbd>–<kbd>#${state.teams.length - 1}</kbd> map to managers in this order</div>
         </section>
 
         <aside class="ledger-panel panel">
@@ -208,13 +244,18 @@ function render() {
 
   if (cameraEnabled && cameraStream) {
     const video = document.querySelector("#room-video");
-    if (video) video.srcObject = cameraStream;
+    const overlay = document.querySelector("#marker-overlay");
+    if (video) {
+      video.srcObject = cameraStream;
+      markerVision.attach(video, overlay);
+    }
   }
   if (voiceDialogOpen) {
     const dialog = document.querySelector("#voice-dialog");
     if (dialog && !dialog.open) dialog.showModal();
   }
   refreshVoiceIndicators();
+  refreshVisionIndicators();
 }
 
 function playerCard(player, highBidder) {
@@ -273,11 +314,12 @@ function teamBidButton(team, index) {
   const maxBid = maxBidForTeam(state, team.id);
   const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || maxBid < Math.max(1, state.auction.amount + state.config.increment);
   return `<button class="team-bid ${isHigh ? "is-high" : ""} ${isArmed ? "is-armed" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" ${disabled ? "disabled" : ""}>
-    <span class="team-key">${index < 9 ? index + 1 : ""}</span>
+    <span class="team-key" title="Keyboard shortcut ${index < 9 ? index + 1 : "unassigned"}">${index < 9 ? index + 1 : ""}</span>
     <span class="team-swatch"></span>
     <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
     <span class="team-money"><strong>$${team.budget}</strong><small>max $${maxBid}</small></span>
     <span class="armed-label">${isHigh ? "HIGH BID" : isArmed ? "VOICE ARMED" : "+ BID"}</span>
+    <span class="marker-badge" title="ArUco bid card #${index}">#${index}</span>
     <span class="voice-profile-dot ${isEnrolled ? "is-enrolled" : ""}" data-voice-dot="${team.id}" style="--voice-score:${Math.round(voiceScore * 100)}%" title="${isEnrolled ? `Voice enrolled · ${Math.round(voiceScore * 100)}% last match` : "Voice not enrolled"}">${icon("fingerprint")}</span>
   </button>`;
 }
@@ -394,6 +436,21 @@ function voiceConfirmation() {
   </div>`;
 }
 
+function visualTieConfirmation() {
+  const teams = pendingVisualTie.teamIds
+    .map((teamId) => state.teams.find((team) => team.id === teamId))
+    .filter(Boolean);
+  const repeated = pendingVisualTie.round > 1;
+  return `<div class="visual-tie-confirmation">
+    <div>${icon("cards")}<span><small>${repeated ? "STILL TIED" : "SIMULTANEOUS CARDS"} · AUCTION PAUSED</small><strong>$${pendingVisualTie.amount} between ${escapeHtml(teams.map((team) => team.manager).join(", "))}</strong></span></div>
+    <p>${repeated ? "Lower and re-raise again, or let the operator award the bid." : "Tied managers: lower your cards, then raise again."}</p>
+    <div class="visual-tie-actions">
+      ${teams.map((team) => `<button data-action="resolve-visual-tie" data-team-id="${team.id}"><i style="background:${team.color}"></i>Award ${escapeHtml(team.manager)}</button>`).join("")}
+      <button class="reject" data-action="cancel-visual-tie">Cancel</button>
+    </div>
+  </div>`;
+}
+
 function wireGlobalEvents() {
   app.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
@@ -411,14 +468,17 @@ function wireGlobalEvents() {
       if (action === "toggle-cloud-interpreter") return toggleCloudInterpreter();
       if (action === "confirm-voice-bid") return confirmPendingVoiceBid(button.dataset.teamId);
       if (action === "reject-voice-bid") { pendingVoiceBid = null; render(); scheduleCountdown(); return; }
+      if (action === "resolve-visual-tie") return resolveVisualTie(button.dataset.teamId);
+      if (action === "cancel-visual-tie") return cancelVisualTie();
       if (action === "dismiss-notice") return showNotice(null);
       if (action === "microphone") return toggleMicrophone();
       if (action === "camera") return toggleCamera();
+      if (action === "print-bid-cards") return printBidCards();
       if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) speechSynthesis.cancel(); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
       if (action === "open") return beginAuction();
       if (action === "pause") { clearTimer(); speechSynthesis.cancel(); return update(pauseAuction(state)); }
-      if (action === "advance") return runCountdownStep();
+      if (action === "advance") return runCountdownStep(true);
       if (action === "next") return update(moveToNextPlayer(state));
       if (action === "bid") { armedTeamId = button.dataset.teamId; return submitBid(button.dataset.teamId); }
       if (action === "undo") { clearTimer(); return update(undoLastSale(state), "Last sale reversed."); }
@@ -456,6 +516,8 @@ function wireGlobalEvents() {
       return { ...team, name: name || team.name, manager: manager || team.manager };
     });
     state = createDraft({ players: seedPlayers, teams, budget, rosterSize, increment });
+    clearVisualBidWindow();
+    pendingVisualTie = null;
     armedTeamId = state.teams[0].id;
     persistDraft();
     document.querySelector("#setup-dialog")?.close();
@@ -471,13 +533,15 @@ function wireGlobalEvents() {
     }
     if (event.code === "Space" && ["open", "once", "twice"].includes(state.auction.phase)) {
       event.preventDefault();
-      runCountdownStep();
+      runCountdownStep(true);
     }
   });
 }
 
 function beginAuction() {
   clearTimer();
+  clearVisualBidWindow();
+  pendingVisualTie = null;
   state = openAuction(state);
   persistDraft();
   render();
@@ -489,6 +553,8 @@ function submitBid(teamId, voiceAmount = null) {
   const input = document.querySelector("#manual-amount");
   const amount = voiceAmount ?? (input ? Number(input.value) : null);
   clearTimer();
+  clearVisualBidWindow();
+  pendingVisualTie = null;
   state = placeBid(state, teamId, amount);
   persistDraft();
   render();
@@ -497,7 +563,8 @@ function submitBid(teamId, voiceAmount = null) {
   speak(`${state.auction.amount} dollars, with ${team.manager}. Do I hear ${next}?`, scheduleCountdown);
 }
 
-function runCountdownStep() {
+function runCountdownStep(force = false) {
+  if (!force && (pendingVoiceBid || pendingVisualTie || visualBidWindow)) return;
   clearTimer();
   const before = state.auction.phase;
   state = advanceCountdown(state);
@@ -516,7 +583,7 @@ function runCountdownStep() {
 
 function scheduleCountdown() {
   clearTimer();
-  if (!autoEnabled || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  if (!autoEnabled || pendingVoiceBid || pendingVisualTie || visualBidWindow || !["open", "once", "twice"].includes(state.auction.phase)) return;
   const delay = COUNTDOWN_DELAYS[state.auction.phase];
   countdownTimer = window.setTimeout(runCountdownStep, delay);
 }
@@ -780,21 +847,144 @@ function confirmPendingVoiceBid(teamId) {
   catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
 }
 
+function handleMarkerRaises(markerIds) {
+  if (!cameraEnabled || pendingVoiceBid || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  const amount = pendingVisualTie?.amount ?? nextVisualBidAmount(state);
+  const allowedTeamIds = pendingVisualTie ? new Set(pendingVisualTie.teamIds) : null;
+  const eligibleTeamIds = markerIds
+    .map((markerId) => teamForMarkerId(state.teams, markerId)?.id)
+    .filter((teamId) => teamId && (!allowedTeamIds || allowedTeamIds.has(teamId)))
+    .filter((teamId) => canPlaceVisualBid(teamId, amount));
+
+  if (!eligibleTeamIds.length) return;
+  clearTimer();
+  if (!visualBidWindow) {
+    visualBidWindow = {
+      teamIds: new Set(),
+      amount,
+      runoffRound: pendingVisualTie?.round || 0,
+      timer: window.setTimeout(resolveVisualBidWindow, VISUAL_BID_WINDOW_MS)
+    };
+  }
+  for (const teamId of eligibleTeamIds) visualBidWindow.teamIds.add(teamId);
+  refreshVisionIndicators();
+}
+
+function resolveVisualBidWindow() {
+  const batch = visualBidWindow;
+  visualBidWindow = null;
+  if (!batch || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  const teamIds = [...batch.teamIds].filter((teamId) => canPlaceVisualBid(teamId, batch.amount));
+  const result = classifyVisualBidBatch(teamIds);
+  if (result.kind === "none") {
+    pendingVisualTie = null;
+    render();
+    scheduleCountdown();
+    return;
+  }
+  if (result.kind === "bid") {
+    try { submitBid(result.teamId, batch.amount); }
+    catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
+    return;
+  }
+
+  pendingVisualTie = {
+    teamIds: result.teamIds,
+    amount: batch.amount,
+    round: batch.runoffRound + 1
+  };
+  render();
+  const managers = result.teamIds
+    .map((teamId) => state.teams.find((team) => team.id === teamId)?.manager)
+    .filter(Boolean)
+    .join(" and ");
+  speak(`Simultaneous bid at ${batch.amount} dollars between ${managers}. Lower your cards, then raise again.`);
+}
+
+function canPlaceVisualBid(teamId, amount) {
+  const team = state.teams.find((item) => item.id === teamId);
+  return Boolean(
+    team
+    && ["open", "once", "twice"].includes(state.auction.phase)
+    && state.auction.highBidderId !== teamId
+    && team.roster.length < state.config.rosterSize
+    && amount >= nextVisualBidAmount(state)
+    && amount <= maxBidForTeam(state, teamId)
+  );
+}
+
+function resolveVisualTie(teamId) {
+  if (!pendingVisualTie?.teamIds.includes(teamId)) return;
+  const amount = pendingVisualTie.amount;
+  try { submitBid(teamId, amount); }
+  catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
+}
+
+function cancelVisualTie() {
+  clearVisualBidWindow();
+  pendingVisualTie = null;
+  render();
+  scheduleCountdown();
+}
+
+function clearVisualBidWindow() {
+  if (visualBidWindow?.timer) window.clearTimeout(visualBidWindow.timer);
+  visualBidWindow = null;
+}
+
 async function toggleCamera() {
   if (cameraEnabled) {
+    markerVision.stop();
+    clearVisualBidWindow();
+    pendingVisualTie = null;
     cameraStream?.getTracks().forEach((track) => track.stop());
     cameraStream = null;
     cameraEnabled = false;
     render();
+    scheduleCountdown();
     return;
   }
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
     cameraEnabled = true;
     render();
-  } catch {
-    showNotice({ kind: "error", message: "Camera permission was denied or no camera is available." });
+    markerVision.start();
+  } catch (error) {
+    markerVision.stop();
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+    cameraEnabled = false;
+    render();
+    showNotice({ kind: "error", message: error?.message || "Camera permission was denied or no camera is available." });
   }
+}
+
+function printBidCards() {
+  const printWindow = window.open("", "gavel-bid-cards");
+  if (!printWindow) throw new Error("Allow pop-ups for localhost so Gavel can open the printable cards.");
+  const cards = state.teams.map((team) => {
+    const markerId = markerIdForTeam(state.teams, team.id);
+    return `<article class="card"><div class="marker">${generateArucoCardSvg(markerId)}</div><span>GAVEL BID CARD · #${markerId}</span><h1>${escapeHtml(team.manager)}</h1><p>${escapeHtml(team.name)}</p><small>Hold the black-and-white marker flat toward the laptop camera.</small></article>`;
+  });
+  const sheets = [];
+  for (let index = 0; index < cards.length; index += 2) sheets.push(`<section class="sheet">${cards.slice(index, index + 2).join("")}</section>`);
+  printWindow.document.write(`<!doctype html><html><head><title>Gavel bid cards</title><style>
+    @page { size: letter landscape; margin: .3in; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; font-family: Arial, sans-serif; }
+    .sheet { width: 10.4in; height: 7.9in; display: grid; grid-template-columns: 1fr 1fr; gap: .25in; page-break-after: always; }
+    .sheet:last-child { page-break-after: auto; }
+    .card { height: 7.9in; display: flex; flex-direction: column; align-items: center; border: 2px dashed #aaa; padding: .2in; text-align: center; }
+    .marker { width: 4.45in; height: 4.45in; flex: 0 0 auto; }
+    .marker svg { width: 100%; height: 100%; display: block; }
+    span { margin-top: .12in; font: 700 11pt monospace; letter-spacing: .08em; }
+    h1 { margin: .15in 0 0; font-size: 27pt; }
+    p { margin: .06in 0 0; font-size: 15pt; }
+    small { margin-top: auto; color: #555; font-size: 9pt; }
+    @media screen { body { padding: 20px; background: #ddd; } .sheet { margin: 0 auto 20px; background: white; box-shadow: 0 4px 20px #888; } }
+  </style></head><body>${sheets.join("")}</body></html>`);
+  printWindow.document.close();
+  window.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 250);
 }
 
 function renderSearchResults(query) {
@@ -857,6 +1047,28 @@ function voiceBadgeLabel() {
   return enrolled ? `Voices ${enrolled}/${state.teams.length}` : "Enroll voices";
 }
 
+function visionStatusLabel() {
+  if (visionState.status === "error") return "SCANNER ERROR";
+  if (visualBidWindow) return "CHECKING TIE WINDOW";
+  if (pendingVisualTie) return `RUNOFF · $${pendingVisualTie.amount}`;
+  return cameraEnabled ? "MARKER BIDDING ACTIVE" : "STANDBY";
+}
+
+function markerStatusContent() {
+  if (!cameraEnabled) return `<span class="marker-empty">Cards #0–#${state.teams.length - 1} are ready to print.</span>`;
+  if (visualBidWindow) return `<span class="marker-empty is-active">Card raised · checking the 300 ms simultaneous-bid window…</span>`;
+  if (!visionState.visibleMarkerIds.length) {
+    const timing = visionState.detectionMs ? ` · ${Math.round(visionState.detectionMs)} ms/frame` : "";
+    return `<span class="marker-empty">Watching for cards at 8 FPS${timing}</span>`;
+  }
+  return visionState.visibleMarkerIds.map((markerId) => {
+    const team = teamForMarkerId(state.teams, markerId);
+    return team
+      ? `<span class="marker-chip" style="--marker:${team.color}"><i></i>#${markerId} ${escapeHtml(team.manager)}</span>`
+      : `<span class="marker-chip is-unknown"><i></i>#${markerId} unassigned</span>`;
+  }).join("");
+}
+
 function microphoneLabel() {
   if (transcriptionService.listenerStatus === "connecting") return "Connecting";
   if (micEnabled && transcriptionService.listenerStatus === "listening") return "Listening";
@@ -885,6 +1097,13 @@ function refreshVoiceIndicators() {
       dot.title = voiceState.profileTeamIds.includes(team.id) ? `Voice enrolled · ${Math.round(score * 100)}% last match` : "Voice not enrolled";
     }
   }
+}
+
+function refreshVisionIndicators() {
+  const label = document.querySelector("#vision-status-label");
+  const strip = document.querySelector("#marker-status");
+  if (label) label.textContent = visionStatusLabel();
+  if (strip) strip.innerHTML = markerStatusContent();
 }
 
 function restoreDraft() {
@@ -916,7 +1135,9 @@ function icon(name) {
     fingerprint: '<path d="M12 10a2 2 0 0 0-2 2c0 1.7-.3 4.2-1.8 6M15.5 13.5c-.2 2.7-1 5.2-2.4 7.2M6.5 16.5c.7-1.7.8-3.2.8-4.5a4.7 4.7 0 0 1 9.4 0c0 .9-.1 1.8-.2 2.7M4.2 12a7.8 7.8 0 0 1 15.6 0c0 3.5-.7 6.7-2 9M7.3 5.3A9.8 9.8 0 0 1 21.8 14M2.2 14A9.8 9.8 0 0 1 4 6.8"/>',
     shield: '<path d="M12 22s8-3.8 8-10V5l-8-3-8 3v7c0 6.2 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
-    alert: '<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5m0 3h.01"/>'
+    alert: '<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5m0 3h.01"/>',
+    print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/>',
+    cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>'
   };
   return `<svg class="icon icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }
