@@ -35,7 +35,7 @@ test("phone bids use the server clock and require an open auction", () => {
   hub.updateAuction({
     roomId: "BDX222",
     hostKey,
-    auction: { phase: "open", amount: 4, nextBid: 5, acceptingBids: true, player: { id: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR" } },
+    auction: { phase: "open", amount: 4, nextBid: 5, acceptingBids: true, player: { id: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR", suggestedValue: 42 } },
     teams: teams.map((team, index) => ({
       id: team.id,
       budget: index ? 200 : 158,
@@ -47,10 +47,27 @@ test("phone bids use the server clock and require an open auction", () => {
   });
   const rosterSnapshot = hub.snapshot("BDX222");
   assert.deepEqual(rosterSnapshot.teams[0].roster, [{ playerId: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR", price: 42 }]);
+  assert.equal(rosterSnapshot.auction.player.suggestedValue, 42);
   now = 2450;
   const bid = hub.placeBid({ roomId: "BDX222", teamId: "team-1", participantToken: phoneOne });
   assert.equal(bid.receivedAt, 2450);
   assert.equal(bid.amount, 5);
+});
+
+test("phones can submit arbitrary legal whole-dollar bids", () => {
+  const hub = new PhoneRoomHub({ now: () => 5000 });
+  hub.upsertRoom({ roomId: "JMP222", hostKey, teams });
+  hub.claimTeam({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne });
+  hub.updateAuction({
+    roomId: "JMP222",
+    hostKey,
+    auction: { phase: "open", amount: 10, nextBid: 11, acceptingBids: true },
+    teams: teams.map((team) => ({ id: team.id, budget: 200, rosterCount: 0, rosterSize: 15, maxBid: team.id === "team-1" ? 50 : 60 }))
+  });
+  assert.equal(hub.placeBid({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne, amount: 35 }).amount, 35);
+  assert.throws(() => hub.placeBid({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne, amount: 10 }), /at least \$11/);
+  assert.throws(() => hub.placeBid({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne, amount: 51 }), /at most \$50/);
+  assert.throws(() => hub.placeBid({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne, amount: 11.5 }), /whole-dollar/);
 });
 
 test("room subscribers receive claim, state, and bid events", () => {

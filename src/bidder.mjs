@@ -1,3 +1,5 @@
+import { easyBidAmounts } from "./phone-bidding.mjs";
+
 const app = document.querySelector("#bidder-app");
 const params = new URL(window.location.href).searchParams;
 const TOKEN_KEY = "sun-god-bidder-token";
@@ -18,15 +20,23 @@ if (roomId) void loadRoom();
 else { status = "code"; message = "Enter the room code shown on the auction laptop."; render(); }
 
 function wireEvents() {
-  app.addEventListener("submit", (event) => {
-    if (event.target.id !== "room-code-form") return;
-    event.preventDefault();
-    const nextCode = String(new FormData(event.target).get("room") || "").trim().toUpperCase();
-    if (!/^[A-Z2-9]{6}$/.test(nextCode)) return showMessage("Enter the six-character room code.", "error");
-    roomId = nextCode;
-    selectedTeamId = localStorage.getItem(teamStorageKey(roomId));
-    window.history.replaceState({}, "", `${window.location.pathname}?room=${encodeURIComponent(roomId)}`);
-    void loadRoom();
+  app.addEventListener("submit", async (event) => {
+    if (event.target.id === "room-code-form") {
+      event.preventDefault();
+      const nextCode = String(new FormData(event.target).get("room") || "").trim().toUpperCase();
+      if (!/^[A-Z2-9]{6}$/.test(nextCode)) return showMessage("Enter the six-character room code.", "error");
+      roomId = nextCode;
+      selectedTeamId = localStorage.getItem(teamStorageKey(roomId));
+      window.history.replaceState({}, "", `${window.location.pathname}?room=${encodeURIComponent(roomId)}`);
+      void loadRoom();
+      return;
+    }
+    if (event.target.id === "custom-bid-form") {
+      event.preventDefault();
+      const amount = Number(new FormData(event.target).get("amount"));
+      try { await placePhoneBid(amount); }
+      catch (error) { showMessage(error.message, "error"); }
+    }
   });
 
   app.addEventListener("click", async (event) => {
@@ -34,7 +44,7 @@ function wireEvents() {
     if (!button) return;
     try {
       if (button.dataset.action === "claim") return await claimTeam(button.dataset.teamId);
-      if (button.dataset.action === "bid") return await placePhoneBid();
+      if (button.dataset.action === "bid") return await placePhoneBid(button.dataset.amount == null ? null : Number(button.dataset.amount));
       if (button.dataset.action === "show-tab") { activePhoneTab = button.dataset.tab === "roster" ? "roster" : "auction"; render(); return; }
       if (button.dataset.action === "switch-team") return await releaseTeam();
       if (button.dataset.action === "retry") return await loadRoom();
@@ -94,13 +104,19 @@ async function releaseTeam() {
   await refreshRoom();
 }
 
-async function placePhoneBid() {
+async function placePhoneBid(requestedAmount = null) {
   if (sendingBid || !selectedTeamId) return;
+  const team = room?.teams?.find((item) => item.id === selectedTeamId);
+  const nextBid = Number(room?.auction?.nextBid);
+  const amount = requestedAmount == null ? nextBid : Number(requestedAmount);
+  if (!Number.isInteger(amount)) throw new Error("Enter a whole-dollar bid.");
+  if (amount < nextBid) throw new Error(`Your bid must be at least $${nextBid}.`);
+  if (amount > Number(team?.maxBid)) throw new Error(`Your team can bid at most $${Number(team?.maxBid || 0)}.`);
   sendingBid = true;
   render();
   try {
-    await postJson("/api/phone-room/bid", { roomId, teamId: selectedTeamId, participantToken });
-    message = "Bid sent";
+    await postJson("/api/phone-room/bid", { roomId, teamId: selectedTeamId, participantToken, amount });
+    message = `Bid $${amount} sent`;
     if (navigator.vibrate) navigator.vibrate([45, 35, 45]);
   } catch (error) {
     message = error.message;
@@ -184,6 +200,12 @@ function renderBidder() {
   const hasHighBid = auction.highBidderId === team.id;
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
   const canBid = auction.acceptingBids && !hasHighBid && canAfford && !sendingBid;
+  const easyBids = easyBidAmounts({
+    currentBid: auction.amount,
+    nextBid: auction.nextBid,
+    suggestedValue: player?.suggestedValue,
+    maxBid: team.maxBid
+  });
   const buttonLabel = sendingBid
     ? "SENDING…"
     : hasHighBid
@@ -201,6 +223,14 @@ function renderBidder() {
       <span class="phone-phase">${escapeHtml(phaseLabel(auction.phase))}</span>
     </div>
     <button class="bid-button ${hasHighBid ? "is-winning" : ""}" data-action="bid" ${canBid ? "" : "disabled"}>${buttonLabel}<small>${canBid ? "Tap once — every bid is confirmed by the host" : escapeHtml(message)}</small></button>
+    <section class="phone-bid-tools" aria-label="Jump bid options">
+      <div class="phone-bid-tools-head"><span><small>EASY BIDS</small><strong>Jump the price</strong></span>${player?.suggestedValue ? `<b>SUGGESTED $${Number(player.suggestedValue)}</b>` : ""}</div>
+      ${easyBids.length ? `<div class="easy-bid-grid">${easyBids.map((amount) => `<button data-action="bid" data-amount="${amount}" ${canBid ? "" : "disabled"}><small>EASY BID</small><strong>$${amount}</strong></button>`).join("")}</div>` : `<p class="no-easy-bids">No useful round-number jumps remain below the suggested value.</p>`}
+      <form id="custom-bid-form" class="custom-bid-form">
+        <label><span>$</span><input name="amount" type="number" inputmode="numeric" min="${Number(auction.nextBid || 1)}" max="${Number(team.maxBid || 0)}" step="1" placeholder="${Number(auction.nextBid || 1)}" aria-label="Custom bid amount" ${canBid ? "" : "disabled"} required /></label>
+        <button ${canBid ? "" : "disabled"}>Place custom bid</button>
+      </form>
+    </section>
     <div class="phone-budget"><span><small>BUDGET</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>ROSTER</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>`;
   const rosterTab = `<div class="phone-roster-view">
       <div class="phone-roster-title"><span class="kicker">TEAM BUILDER</span><h1>Your roster</h1><p>${roster.length ? `${roster.length} player${roster.length === 1 ? "" : "s"} drafted` : "Players appear here immediately after they are sold to you."}</p></div>

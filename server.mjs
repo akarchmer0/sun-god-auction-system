@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { networkInterfaces } from "node:os";
 import { PhoneRoomHub } from "./src/phone-room-hub.mjs";
+import { CartesiaSpeechService } from "./src/cartesia-speech-service.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
@@ -17,6 +18,11 @@ const runtimePath = resolve(root, ".runtime/python");
 const openAiApiKey = String(process.env.OPENAI_API_KEY || "").trim();
 const auctionIntentModel = String(process.env.GAVEL_INTENT_MODEL || "gpt-5-mini").trim() || "gpt-5-mini";
 const transcriptionModel = String(process.env.GAVEL_TRANSCRIPTION_MODEL || "gpt-realtime-whisper").trim() || "gpt-realtime-whisper";
+const cartesiaSpeech = new CartesiaSpeechService({
+  apiKey: process.env.CARTESIA_API_KEY,
+  voiceId: process.env.CARTESIA_VOICE_ID,
+  model: process.env.CARTESIA_MODEL
+});
 const safetyIdentifier = createHash("sha256").update(`${process.env.USER || "gavel"}:${root}`).digest("hex");
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -58,6 +64,12 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/transcription/session") {
       return sendJson(response, 200, await createRealtimeTranscriptionSession());
     }
+    if (request.method === "GET" && url.pathname === "/api/auctioneer/status") {
+      return sendJson(response, 200, cartesiaSpeech.status());
+    }
+    if (request.method === "POST" && url.pathname === "/api/auctioneer/speech") {
+      return await streamAuctioneerSpeech(request, response);
+    }
     if (request.method === "GET" && url.pathname === "/api/phone-room") {
       const room = phoneRoomHub.snapshot(url.searchParams.get("room"));
       return sendJson(response, 200, withJoinUrls(request, room));
@@ -96,6 +108,13 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, "::", () => {
   console.log(`Sun God Auction Systems is running at http://localhost:${port}`);
+  if (cartesiaSpeech.status().available) {
+    cartesiaSpeech.warm()
+      .then(() => console.log(`Cartesia auctioneer is ready (${cartesiaSpeech.model}).`))
+      .catch((error) => console.warn(`[Cartesia] ${cleanError(error)}`));
+  } else {
+    console.log("Cartesia auctioneer is not configured; browser voice fallback is active.");
+  }
 });
 
 function createSpeakerWorker() {
@@ -215,6 +234,55 @@ async function readJsonRequest(request) {
     return JSON.parse(body.toString("utf8"));
   } catch {
     throw apiError("The request was not valid JSON.", 400);
+  }
+}
+
+async function streamAuctioneerSpeech(request, response) {
+  if (!cartesiaSpeech.status().available) throw apiError(cartesiaSpeech.status().message, 503);
+  const payload = await readJsonRequest(request);
+  const text = String(payload?.text || "").trim().slice(0, 1_500);
+  const style = String(payload?.style || "neutral").trim().slice(0, 30);
+  if (!text) throw apiError("Auctioneer speech text is required.", 400);
+
+  response.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+
+  let completed = false;
+  let speech;
+  const cancel = () => {
+    if (!completed) speech?.cancel();
+  };
+  request.once("aborted", cancel);
+  response.once("close", cancel);
+
+  try {
+    speech = await cartesiaSpeech.createSpeech({
+      transcript: text,
+      style,
+      onEvent: (event) => {
+        if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+      }
+    });
+    response.write(`${JSON.stringify({ type: "start", contextId: speech.contextId, sampleRate: speech.sampleRate, encoding: "pcm_s16le" })}\n`);
+    await speech.done;
+    completed = true;
+    if (!response.destroyed && !response.writableEnded) {
+      response.write(`${JSON.stringify({ type: "done" })}\n`);
+      response.end();
+    }
+  } catch (error) {
+    completed = true;
+    if (!response.destroyed && !response.writableEnded) {
+      response.write(`${JSON.stringify({ type: "error", message: cleanError(error) })}\n`);
+      response.end();
+    }
+  } finally {
+    request.off("aborted", cancel);
+    response.off("close", cancel);
   }
 }
 
@@ -460,7 +528,7 @@ function loadLocalEnv(directory) {
   try { source = readFileSync(envPath, "utf8"); }
   catch (error) { if (error?.code !== "ENOENT") console.warn("Could not read Sun God's .env file."); return; }
   for (const line of source.split(/\r?\n/)) {
-    const match = line.match(/^\s*(?:export\s+)?(OPENAI_API_KEY|GAVEL_INTENT_MODEL|GAVEL_TRANSCRIPTION_MODEL)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^\s*(?:export\s+)?(OPENAI_API_KEY|GAVEL_INTENT_MODEL|GAVEL_TRANSCRIPTION_MODEL|CARTESIA_API_KEY|CARTESIA_VOICE_ID|CARTESIA_MODEL)\s*=\s*(.*?)\s*$/);
     if (!match || process.env[match[1]]) continue;
     const value = match[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2").trim();
     if (value) process.env[match[1]] = value;
@@ -492,6 +560,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     if (isShuttingDown) return;
     isShuttingDown = true;
     speakerWorker.stop();
+    cartesiaSpeech.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 400).unref();
   });

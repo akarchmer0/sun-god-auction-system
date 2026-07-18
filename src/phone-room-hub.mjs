@@ -101,7 +101,7 @@ export class PhoneRoomHub {
     return snapshot;
   }
 
-  placeBid({ roomId, teamId, participantToken }) {
+  placeBid({ roomId, teamId, participantToken, amount }) {
     const room = this.requireRoom(roomId);
     requireToken(participantToken, "participant token");
     if (room.claims.get(teamId) !== participantToken) throw roomError("This phone is not connected to that team.", 403);
@@ -110,6 +110,10 @@ export class PhoneRoomHub {
     if (auction.highBidderId === teamId) throw roomError("You already have the high bid.", 409);
     const team = this.snapshot(room.id).teams.find((item) => item.id === teamId);
     if (!team || Number(team.maxBid) < Number(auction.nextBid)) throw roomError("Your team cannot place the next legal bid.", 409);
+    const bidAmount = amount == null ? Number(auction.nextBid) : Number(amount);
+    if (!Number.isInteger(bidAmount)) throw roomError("Enter a whole-dollar bid.", 400);
+    if (bidAmount < Number(auction.nextBid)) throw roomError(`Your bid must be at least $${auction.nextBid}.`, 409);
+    if (bidAmount > Number(team.maxBid)) throw roomError(`Your team can bid at most $${team.maxBid}.`, 409);
 
     const receivedAt = this.now();
     const lastBidAt = room.lastBidAtByTeam.get(teamId) || 0;
@@ -120,7 +124,7 @@ export class PhoneRoomHub {
       id: `${room.id}-${receivedAt}-${teamId}`,
       roomId: room.id,
       teamId,
-      amount: Number(auction.nextBid),
+      amount: bidAmount,
       receivedAt
     };
     this.emit(room.id, bid);
@@ -216,7 +220,8 @@ function normalizeAuction(auction) {
       id: cleanText(auction.player.id, 100),
       name: cleanText(auction.player.name, 140),
       position: cleanText(auction.player.position, 20),
-      nflTeam: cleanText(auction.player.nflTeam, 20)
+      nflTeam: cleanText(auction.player.nflTeam, 20),
+      suggestedValue: boundedNumber(auction.player.suggestedValue)
     } : null
   };
 }

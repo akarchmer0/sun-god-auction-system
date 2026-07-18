@@ -3,10 +3,12 @@ import { parseSpokenBid } from "./bid-voice.mjs";
 import { hasPotentialBidSignal, normalizeCloudAuctionIntent } from "./auction-intent.mjs";
 import { RealtimeTranscriber } from "./realtime-transcriber.mjs";
 import { VoiceIdentityService } from "./voice-identity.mjs";
+import { AuctioneerVoice } from "./auctioneer-voice.mjs";
+import { createAuctioneerScript } from "./auctioneer-script.mjs";
+import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import {
   VISUAL_BID_WINDOW_MS,
   bidsShareWindow,
-  classifyVisualBidBatch,
   nextVisualBidAmount
 } from "./vision-bidding.mjs";
 import {
@@ -27,6 +29,7 @@ const CLOUD_INTERPRETER_STORAGE_KEY = "gavel-cloud-interpreter-enabled";
 const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
+const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({ players: seedPlayers, teams: makeTeams(), budget: 200, rosterSize: 15 });
 let armedTeamId = state.teams[0]?.id || null;
@@ -63,6 +66,14 @@ let transcriptionService = {
   message: "Checking whether OpenAI live transcription is configured.",
   error: null
 };
+let auctioneerService = {
+  status: "checking",
+  available: null,
+  provider: "cartesia",
+  model: null,
+  voiceId: null,
+  message: "Checking Cartesia's realtime auctioneer."
+};
 let voiceState = {
   status: "ready",
   error: null,
@@ -72,6 +83,18 @@ let voiceState = {
   isRecognizing: false,
   latestScores: {}
 };
+let speechPausedMic = false;
+let speechPausedIdentity = false;
+const auctioneerScript = createAuctioneerScript();
+const auctioneerVoice = new AuctioneerVoice({
+  onStatusChange: (snapshot) => {
+    const changed = snapshot.status !== auctioneerService.status
+      || snapshot.available !== auctioneerService.available
+      || snapshot.message !== auctioneerService.message;
+    auctioneerService = snapshot;
+    if (changed) render();
+  }
+});
 const voiceIdentity = new VoiceIdentityService({
   onStateChange: (snapshot) => {
     const structuralChange = snapshot.status !== voiceState.status
@@ -113,6 +136,7 @@ wireGlobalEvents();
 voiceIdentity.loadStoredProfiles().catch((error) => showNotice({ kind: "error", message: error.message }));
 refreshCloudInterpreter();
 refreshTranscriptionService();
+void auctioneerVoice.initialize();
 void initializePhoneRoom();
 
 function render() {
@@ -142,7 +166,7 @@ function render() {
           <button class="device-button ${micEnabled ? "is-on" : ""}" data-action="microphone" title="Toggle OpenAI bid listening">${icon("mic")} <span>${microphoneLabel()}</span></button>
           <button class="device-button voice-id-button ${voiceState.isRecognizing ? "is-on" : ""}" data-action="voice-setup" title="Enroll and manage manager voices">${icon("fingerprint")} <span id="voice-id-label">${voiceBadgeLabel()}</span></button>
           <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
-          <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="Toggle auctioneer voice">${icon("volume")}</button>
+          <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
       </header>
@@ -181,7 +205,7 @@ function render() {
             <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>
             <div><small>${micEnabled ? "OPENAI HEARD IN THE ROOM" : "VOICE INPUT"}</small><p id="live-transcript">${escapeHtml(lastTranscript)}</p></div>
           </div>
-          <p class="camera-note">Each manager scans once, chooses their team, and taps one large bid button. The laptop remains authoritative for increments, budgets, rosters, and simultaneous bids.</p>
+          <p class="camera-note">Each manager scans once, chooses their team, then uses the next-dollar button, an easy jump, or a custom whole-dollar bid. The laptop remains authoritative for budgets, rosters, and simultaneous bids.</p>
         </section>
 
         <section class="auction-stage">
@@ -334,6 +358,7 @@ function voiceSetupDialog() {
   return `<div class="voice-setup">
     <div class="dialog-head"><div><span class="eyebrow">PRIVATE VOICE CHECK-IN</span><h2>Recognize every manager</h2></div><button type="button" data-action="close-voice-setup" class="dialog-close" aria-label="Close">×</button></div>
     <p class="voice-intro">Each manager speaks for six seconds to create a local voiceprint. Raw enrollment audio is discarded after local processing. When the main microphone is on, detected speech is transcribed by OpenAI; voiceprints stay on this Mac. The bid interpreter receives only the final text plus auction context. Always get everyone’s consent before enrolling.</p>
+    ${auctioneerVoiceCard()}
     ${transcriptionCard()}
     ${cloudInterpreterCard()}
     ${!voiceIdentity.isSupported ? `<div class="voice-error">Speaker recognition is unavailable in this browser. Use a current version of Chrome, Safari, Firefox, or Edge.</div>` : ""}
@@ -346,6 +371,16 @@ function voiceSetupDialog() {
     <span>Voiceprints are biometric identifiers stored only in this browser’s IndexedDB on this Mac.</span>
       ${enrolledCount ? `<button type="button" class="text-button danger" data-action="delete-all-voices">Delete all voiceprints</button>` : ""}
     </div>
+  </div>`;
+}
+
+function auctioneerVoiceCard() {
+  const ready = auctioneerService.status === "ready" && auctioneerService.available;
+  const summary = ready
+    ? `Cartesia ${auctioneerService.model} is streaming expressive, interruptible speech. Phone bids immediately preempt the current announcement.`
+    : auctioneerService.message;
+  return `<div class="cloud-interpreter-card ${ready ? "is-active" : ""}">
+    <div><span class="eyebrow">AI AUCTIONEER VOICE</span><strong>${ready ? "CARTESIA READY" : auctioneerService.status === "checking" ? "CHECKING" : "BROWSER FALLBACK"}</strong><p>${escapeHtml(summary)}</p></div>
   </div>`;
 }
 
@@ -458,10 +493,10 @@ function wireGlobalEvents() {
       if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (action === "copy-phone-link") return copyPhoneJoinLink();
       if (action === "reset-phone-claims") return resetPhoneClaims();
-      if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) speechSynthesis.cancel(); render(); return; }
+      if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) stopAuctioneer({ resumeListening: true }); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
       if (action === "open") return beginAuction();
-      if (action === "pause") { clearTimer(); speechSynthesis.cancel(); return update(pauseAuction(state)); }
+      if (action === "pause") { clearTimer(); stopAuctioneer({ resumeListening: true }); return update(pauseAuction(state)); }
       if (action === "advance") return runCountdownStep(true);
       if (action === "next") return update(moveToNextPlayer(state));
       if (action === "bid") { armedTeamId = button.dataset.teamId; return submitBid(button.dataset.teamId); }
@@ -531,10 +566,10 @@ function beginAuction() {
   persistDraft();
   render();
   const player = currentPlayer(state);
-  speak(`All right, next up is ${player.name}, ${player.position}, ${player.nflTeam}. We will start at one dollar. Who gives me one?`, scheduleCountdown);
+  speak(auctioneerScript.nomination(player), scheduleCountdown, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
 }
 
-function submitBid(teamId, voiceAmount = null) {
+function submitBid(teamId, voiceAmount = null, { source = "manual" } = {}) {
   const input = document.querySelector("#manual-amount");
   const amount = voiceAmount ?? (input ? Number(input.value) : null);
   clearTimer();
@@ -545,7 +580,10 @@ function submitBid(teamId, voiceAmount = null) {
   render();
   const team = state.teams.find((item) => item.id === teamId);
   const next = state.auction.amount + state.config.increment;
-  speak(`${state.auction.amount} dollars, with ${team.manager}. Do I hear ${next}?`, scheduleCountdown);
+  speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), scheduleCountdown, {
+    style: "bid",
+    priority: SPEECH_PRIORITY.bid
+  });
 }
 
 function runCountdownStep(force = false) {
@@ -555,14 +593,14 @@ function runCountdownStep(force = false) {
   state = advanceCountdown(state);
   persistDraft();
   render();
-  if (state.auction.phase === "once") speak(`${state.auction.amount} dollars, going once.`, scheduleCountdown);
-  else if (state.auction.phase === "twice") speak(`Going twice. Fair warning.`, scheduleCountdown);
+  if (state.auction.phase === "once") speak(auctioneerScript.goingOnce(state.auction.amount), scheduleCountdown, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+  else if (state.auction.phase === "twice") speak(auctioneerScript.goingTwice(state.auction.amount), scheduleCountdown, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
   else if (state.auction.phase === "sold") {
     const player = currentPlayer(state);
     const team = state.teams.find((item) => item.id === state.auction.highBidderId);
-    speak(`Sold! ${player.name} to ${team.name}, managed by ${team.manager}, for ${state.auction.amount} dollars.`);
+    speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), null, { style: "sold", priority: SPEECH_PRIORITY.sold });
   } else if (state.auction.phase === "passed" && before === "open") {
-    speak(`No interest. ${currentPlayer(state).name} goes back to the player pool.`);
+    speak(auctioneerScript.passed(currentPlayer(state)), null, { style: "passed", priority: SPEECH_PRIORITY.sold });
   }
 }
 
@@ -578,29 +616,34 @@ function clearTimer() {
   countdownTimer = null;
 }
 
-function speak(text, onDone) {
-  if (!voiceEnabled || !("speechSynthesis" in window)) { onDone?.(); return; }
-  const shouldResumeMic = micEnabled;
-  const shouldResumeIdentity = voiceState.isRecognizing;
-  if (shouldResumeMic) void transcriber.stop();
-  if (shouldResumeIdentity) void voiceIdentity.stopRecognition();
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.08;
-  utterance.pitch = 0.84;
-  const voices = speechSynthesis.getVoices();
-  utterance.voice = voices.find((voice) => /Daniel|Alex|Google UK English Male/i.test(voice.name)) || voices.find((voice) => voice.lang.startsWith("en")) || null;
-  utterance.onend = () => {
-    if (shouldResumeMic && micEnabled) startLiveTranscription().catch((error) => handleTranscriptionFailure(error));
-    if (shouldResumeIdentity && micEnabled) voiceIdentity.startRecognition().catch(() => {});
-    onDone?.();
-  };
-  utterance.onerror = () => {
-    if (shouldResumeMic && micEnabled) startLiveTranscription().catch((error) => handleTranscriptionFailure(error));
-    if (shouldResumeIdentity && micEnabled) voiceIdentity.startRecognition().catch(() => {});
-    onDone?.();
-  };
-  speechSynthesis.speak(utterance);
+function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
+  if (!voiceEnabled) { onDone?.(); return; }
+  if (micEnabled) speechPausedMic = true;
+  if (voiceState.isRecognizing) speechPausedIdentity = true;
+  if (speechPausedMic) void transcriber.stop();
+  if (speechPausedIdentity) void voiceIdentity.stopRecognition();
+  auctioneerVoice.speak(text, {
+    style,
+    priority,
+    onDone: () => {
+      resumeListeningAfterSpeech();
+      onDone?.();
+    }
+  });
+}
+
+function stopAuctioneer({ resumeListening = false } = {}) {
+  auctioneerVoice.cancel();
+  if (resumeListening) resumeListeningAfterSpeech();
+}
+
+function resumeListeningAfterSpeech() {
+  const resumeMic = speechPausedMic;
+  const resumeIdentity = speechPausedIdentity;
+  speechPausedMic = false;
+  speechPausedIdentity = false;
+  if (resumeMic && micEnabled) startLiveTranscription().catch((error) => handleTranscriptionFailure(error));
+  if (resumeIdentity && micEnabled) voiceIdentity.startRecognition().catch(() => {});
 }
 
 async function toggleMicrophone() {
@@ -614,6 +657,12 @@ async function toggleMicrophone() {
     return;
   }
   micEnabled = true;
+  if (auctioneerVoice.isSpeaking) {
+    speechPausedMic = true;
+    speechPausedIdentity = true;
+    render();
+    return;
+  }
   try {
     await startLiveTranscription();
     voiceIdentity.startRecognition().catch((error) => showNotice({ kind: "error", message: `Voice identity could not start: ${error.message}` }));
@@ -810,7 +859,9 @@ async function interpretCloudAuctionIntent(transcript) {
 }
 
 async function beginVoiceEnrollment(teamId) {
-  speechSynthesis.cancel();
+  stopAuctioneer();
+  speechPausedMic = false;
+  speechPausedIdentity = false;
   clearTimer();
   if (micEnabled) {
     micEnabled = false;
@@ -835,37 +886,39 @@ function confirmPendingVoiceBid(teamId) {
 function handlePhoneBid(bid) {
   if (!bid?.teamId || pendingVoiceBid || !["open", "once", "twice"].includes(state.auction.phase)) return;
   if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
-  collectExternalBids([bid.teamId], "phone", bid.receivedAt);
+  collectExternalBids([{ teamId: bid.teamId, amount: bid.amount }], "phone", bid.receivedAt);
 }
 
-function collectExternalBids(teamIds, source, receivedAt = Date.now()) {
-  const amount = pendingVisualTie?.amount ?? nextVisualBidAmount(state);
+function collectExternalBids(bids, source, receivedAt = Date.now()) {
   const allowedTeamIds = pendingVisualTie ? new Set(pendingVisualTie.teamIds) : null;
-  const eligibleTeamIds = teamIds
-    .filter((teamId) => teamId && (!allowedTeamIds || allowedTeamIds.has(teamId)))
-    .filter((teamId) => canPlaceVisualBid(teamId, amount));
+  const eligibleBids = bids
+    .map((bid) => ({ teamId: bid?.teamId, amount: Number(bid?.amount) }))
+    .filter((bid) => bid.teamId && (!allowedTeamIds || allowedTeamIds.has(bid.teamId)))
+    .filter((bid) => canPlaceVisualBid(bid.teamId, bid.amount));
 
-  if (!eligibleTeamIds.length) return;
+  if (!eligibleBids.length) return;
   clearTimer();
   if (!visualBidWindow) {
     visualBidWindow = {
-      teamIds: new Set(),
-      amount,
+      bids: new Map(),
       source,
       openedAt: receivedAt,
       runoffRound: pendingVisualTie?.round || 0,
       timer: window.setTimeout(resolveVisualBidWindow, VISUAL_BID_WINDOW_MS)
     };
   }
-  for (const teamId of eligibleTeamIds) visualBidWindow.teamIds.add(teamId);
+  for (const bid of eligibleBids) {
+    const existing = visualBidWindow.bids.get(bid.teamId);
+    if (!existing || bid.amount > existing.amount) visualBidWindow.bids.set(bid.teamId, bid);
+  }
 }
 
 function resolveVisualBidWindow() {
   const batch = visualBidWindow;
   visualBidWindow = null;
   if (!batch || !["open", "once", "twice"].includes(state.auction.phase)) return;
-  const teamIds = [...batch.teamIds].filter((teamId) => canPlaceVisualBid(teamId, batch.amount));
-  const result = classifyVisualBidBatch(teamIds);
+  const bids = [...batch.bids.values()].filter((bid) => canPlaceVisualBid(bid.teamId, bid.amount));
+  const result = classifyPhoneBidBatch(bids);
   if (result.kind === "none") {
     pendingVisualTie = null;
     render();
@@ -873,14 +926,14 @@ function resolveVisualBidWindow() {
     return;
   }
   if (result.kind === "bid") {
-    try { submitBid(result.teamId, batch.amount); }
+    try { submitBid(result.teamId, result.amount, { source: batch.source }); }
     catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
     return;
   }
 
   pendingVisualTie = {
     teamIds: result.teamIds,
-    amount: batch.amount,
+    amount: result.amount,
     source: batch.source,
     round: batch.runoffRound + 1
   };
@@ -890,7 +943,7 @@ function resolveVisualBidWindow() {
     .map((teamId) => state.teams.find((team) => team.id === teamId)?.manager)
     .filter(Boolean)
     .join(" and ");
-  speak(`Simultaneous bid at ${batch.amount} dollars between ${managers}. The auction is paused for a ruling.`);
+  speak(auctioneerScript.simultaneous({ amount: result.amount, managers }), null, { style: "ruling", priority: SPEECH_PRIORITY.ruling });
 }
 
 function canPlaceVisualBid(teamId, amount) {
@@ -908,7 +961,7 @@ function canPlaceVisualBid(teamId, amount) {
 function resolveVisualTie(teamId) {
   if (!pendingVisualTie?.teamIds.includes(teamId)) return;
   const amount = pendingVisualTie.amount;
-  try { submitBid(teamId, amount); }
+  try { submitBid(teamId, amount, { source: pendingVisualTie.source }); }
   catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
 }
 
@@ -997,7 +1050,7 @@ async function syncPhoneRoomState() {
         nextBid: nextVisualBidAmount(state),
         highBidderId: state.auction.highBidderId,
         acceptingBids: ["open", "once", "twice"].includes(state.auction.phase) && !pendingVoiceBid && !pendingVisualTie,
-        player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam } : null
+        player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam, suggestedValue: player.suggestedValue } : null
       },
       teams: state.teams.map((team) => ({
         id: team.id,
@@ -1135,6 +1188,12 @@ function microphoneLabel() {
   if (transcriptionService.listenerStatus === "connecting") return "Connecting";
   if (micEnabled && transcriptionService.listenerStatus === "listening") return "Listening";
   return micEnabled ? "Starting" : "Mic off";
+}
+
+function auctioneerVoiceTitle() {
+  if (!voiceEnabled) return "Turn on auctioneer voice";
+  if (auctioneerService.status === "ready" && auctioneerService.available) return `Cartesia ${auctioneerService.model} auctioneer is on`;
+  return "Auctioneer voice is on with browser fallback";
 }
 
 function refreshTranscript() {
