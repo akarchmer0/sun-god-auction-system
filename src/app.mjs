@@ -182,7 +182,6 @@ function render() {
             <div><span class="eyebrow">VISUAL BIDDING</span><h2>ArUco card scanner</h2></div>
             <div class="marker-tools">
               <span class="privacy-chip">ON DEVICE</span>
-              <button class="range-button ${farRoomEnabled ? "is-active" : ""}" data-action="toggle-far-room" title="${farRoomEnabled ? "Return to the normal 640px scanner" : "Use 1024px scanning for distant cards"}">${icon("expand")} ${farRoomEnabled ? "FAR · 1024PX" : "FAR ROOM"}</button>
               <button class="text-button" data-action="print-bid-cards">${icon("print")} Print cards</button>
             </div>
           </div>
@@ -197,6 +196,10 @@ function render() {
             </div>
             <div class="camera-status"><i></i><span id="vision-status-label">${visionStatusLabel()}</span></div>
           </div>
+          <button class="scanner-mode-button ${farRoomEnabled ? "is-active" : ""}" data-action="toggle-far-room" aria-pressed="${farRoomEnabled}" title="${farRoomEnabled ? "Return to the normal 640px scanner" : "Use 1024px scanning for distant cards"}">
+            <span class="scanner-mode-name">${icon("expand")}<span><small>SCAN RANGE</small><strong>Far room mode</strong></span></span>
+            <span class="scanner-mode-state">${farRoomEnabled ? "ON · 1024PX" : "OFF · 640PX"}</span>
+          </button>
           <div id="marker-status" class="marker-strip">${markerStatusContent()}</div>
           <div class="listener-card ${micEnabled ? "is-listening" : ""}">
             <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>

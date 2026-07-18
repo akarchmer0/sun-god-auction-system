@@ -75,10 +75,6 @@ button { color: inherit; }
 .marker-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .marker-tools .text-button { font-size: 8px; }
 .marker-tools .icon { width: 12px; }
-.range-button { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 7px; background: transparent; color: var(--paper); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .07em; cursor: pointer; }
-.range-button:hover { background: #fff9ed; }
-.range-button.is-active { background: var(--paper); color: #f6eedc; box-shadow: 3px 3px 0 var(--orange); }
-.range-button .icon { width: 11px; height: 11px; }
 
 .camera-panel { grid-area: camera; padding-bottom: 20px; }
 .video-wrap { margin: 0 18px; aspect-ratio: 16/9; max-height: 370px; overflow: hidden; background: #121210; border: 1px solid #2c2c29; border-radius: 8px; position: relative; }
@@ -98,6 +94,16 @@ button { color: inherit; }
 .camera-status { position: absolute; top: 10px; left: 10px; display: flex; align-items: center; gap: 6px; background: rgba(10,10,9,.7); backdrop-filter: blur(8px); padding: 5px 7px; border-radius: 4px; color: #c5c3bc; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
 .camera-status i { width: 5px; height: 5px; border-radius: 50%; background: #67675f; }
 .camera-active .camera-status i { background: var(--green); }
+.scanner-mode-button { width: calc(100% - 36px); min-height: 45px; margin: 10px 18px 0; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; background: #fff9ed; color: var(--paper); display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; text-align: left; transition: transform .14s ease, box-shadow .14s ease, background .14s ease; }
+.scanner-mode-button:hover { transform: translateY(-1px); box-shadow: 3px 3px 0 rgba(23,19,14,.18); }
+.scanner-mode-name { display: flex; align-items: center; gap: 9px; }
+.scanner-mode-name .icon { width: 16px; height: 16px; }
+.scanner-mode-name small { display: block; color: var(--muted); font: 600 7px/1 "DM Mono", monospace; letter-spacing: .14em; }
+.scanner-mode-name strong { display: block; margin-top: 4px; font-size: 10px; line-height: 1; }
+.scanner-mode-state { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; font: 700 8px/1 "DM Mono", monospace; letter-spacing: .05em; }
+.scanner-mode-button.is-active { background: var(--paper); color: #f6eedc; box-shadow: 4px 4px 0 var(--orange); }
+.scanner-mode-button.is-active .scanner-mode-name small { color: #c7bda9; }
+.scanner-mode-button.is-active .scanner-mode-state { border-color: #f6eedc; color: #f3c45e; }
 .marker-strip { min-height: 33px; margin: 9px 18px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 .marker-empty { color: #696961; font: 500 8px/1.4 "DM Mono", monospace; }
 .marker-empty.is-active { color: var(--orange-soft); }
