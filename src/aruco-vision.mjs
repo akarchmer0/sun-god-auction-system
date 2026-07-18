@@ -16,6 +16,7 @@ export class ArucoVision {
     colorForMarker = () => "#f05d23"
   } = {}) {
     this.width = width;
+    this.fps = fps;
     this.frameInterval = 1000 / fps;
     this.onDetections = onDetections;
     this.onMarkerRaised = onMarkerRaised;
@@ -38,6 +39,20 @@ export class ArucoVision {
     this.overlay = overlay;
   }
 
+  setProfile({ width, fps }) {
+    if (!Number.isInteger(width) || width < 320) throw new Error("Vision width must be at least 320 pixels.");
+    if (!Number.isFinite(fps) || fps < 1) throw new Error("Vision frame rate must be at least 1 FPS.");
+    this.width = width;
+    this.fps = fps;
+    this.frameInterval = 1000 / fps;
+    this.lastFrameAt = 0;
+    this.onStateChange({
+      status: this.running ? "scanning" : "standby",
+      scanWidth: this.width,
+      scanFps: this.fps
+    });
+  }
+
   start() {
     if (this.running) return;
     this.detector ||= new AR.Detector({
@@ -46,7 +61,7 @@ export class ArucoVision {
     });
     this.running = true;
     this.lastFrameAt = 0;
-    this.onStateChange({ status: "scanning" });
+    this.onStateChange({ status: "scanning", scanWidth: this.width, scanFps: this.fps });
     this.frameRequest = requestAnimationFrame((now) => this.tick(now));
   }
 
@@ -56,8 +71,8 @@ export class ArucoVision {
     this.frameRequest = null;
     this.latch.reset();
     this.clearOverlay();
-    this.onDetections([], { detectionMs: 0 });
-    this.onStateChange({ status: "standby" });
+    this.onDetections([], { detectionMs: 0, width: this.width, fps: this.fps });
+    this.onStateChange({ status: "standby", scanWidth: this.width, scanFps: this.fps });
   }
 
   tick(now) {
@@ -76,7 +91,7 @@ export class ArucoVision {
     try {
       const aspect = video.videoWidth / video.videoHeight;
       const width = this.width;
-      const height = Math.max(240, Math.min(480, Math.round(width / aspect)));
+      const height = Math.max(240, Math.min(768, Math.round(width / aspect)));
       if (this.processingCanvas.width !== width || this.processingCanvas.height !== height) {
         this.processingCanvas.width = width;
         this.processingCanvas.height = height;
@@ -87,7 +102,7 @@ export class ArucoVision {
       const markers = this.detector.detect(image);
       const detectionMs = performance.now() - startedAt;
       this.drawOverlay(markers, width, height);
-      this.onDetections(markers, { detectionMs });
+      this.onDetections(markers, { detectionMs, width: this.width, fps: this.fps });
       const raisedIds = this.latch.update(markers.map((marker) => marker.id), now);
       if (raisedIds.length) this.onMarkerRaised(raisedIds, now);
     } catch (error) {
@@ -105,8 +120,9 @@ export class ArucoVision {
     }
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, width, height);
-    context.lineWidth = 4;
-    context.font = '700 18px "Manrope", sans-serif';
+    const displayScale = width / DEFAULT_WIDTH;
+    context.lineWidth = 4 * displayScale;
+    context.font = `700 ${18 * displayScale}px "Manrope", sans-serif`;
 
     for (const marker of markers) {
       const corners = marker.corners.map((corner) => ({ x: width - corner.x, y: corner.y }));
@@ -122,12 +138,14 @@ export class ArucoVision {
       const centerX = corners.reduce((sum, corner) => sum + corner.x, 0) / corners.length;
       const top = Math.min(...corners.map((corner) => corner.y));
       const label = this.labelForMarker(marker.id);
-      const labelWidth = context.measureText(label).width + 18;
-      const labelX = Math.max(4, Math.min(width - labelWidth - 4, centerX - labelWidth / 2));
-      const labelY = Math.max(25, top - 7);
-      context.fillRect(labelX, labelY - 22, labelWidth, 26);
+      const labelPadding = 9 * displayScale;
+      const labelWidth = context.measureText(label).width + labelPadding * 2;
+      const edgePadding = 4 * displayScale;
+      const labelX = Math.max(edgePadding, Math.min(width - labelWidth - edgePadding, centerX - labelWidth / 2));
+      const labelY = Math.max(25 * displayScale, top - 7 * displayScale);
+      context.fillRect(labelX, labelY - 22 * displayScale, labelWidth, 26 * displayScale);
       context.fillStyle = "#11110f";
-      context.fillText(label, labelX + 9, labelY - 3);
+      context.fillText(label, labelX + labelPadding, labelY - 3 * displayScale);
     }
   }
 

@@ -9,7 +9,8 @@ import {
   classifyVisualBidBatch,
   markerIdForTeam,
   nextVisualBidAmount,
-  teamForMarkerId
+  teamForMarkerId,
+  visionScanProfile
 } from "./vision-bidding.mjs";
 import {
   createDraft,
@@ -26,12 +27,14 @@ import {
 
 const STORAGE_KEY = "gavel-draft-v1";
 const CLOUD_INTERPRETER_STORAGE_KEY = "gavel-cloud-interpreter-enabled";
+const FAR_ROOM_STORAGE_KEY = "sun-god-far-room-enabled";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({ players: seedPlayers, teams: makeTeams(), budget: 200, rosterSize: 15 });
 let armedTeamId = state.teams[0]?.id || null;
 let micEnabled = false;
 let cameraEnabled = false;
+let farRoomEnabled = localStorage.getItem(FAR_ROOM_STORAGE_KEY) === "true";
 let voiceEnabled = true;
 let autoEnabled = true;
 let cameraStream = null;
@@ -68,12 +71,17 @@ let visionState = {
   status: "standby",
   visibleMarkerIds: [],
   detectionMs: 0,
+  scanWidth: visionScanProfile(farRoomEnabled).width,
+  scanFps: visionScanProfile(farRoomEnabled).fps,
   error: null
 };
 const markerVision = new ArucoVision({
+  ...visionScanProfile(farRoomEnabled),
   onDetections: (markers, stats) => {
     visionState.visibleMarkerIds = [...new Set(markers.map((marker) => marker.id))].sort((a, b) => a - b);
     visionState.detectionMs = stats.detectionMs;
+    visionState.scanWidth = stats.width || visionState.scanWidth;
+    visionState.scanFps = stats.fps || visionState.scanFps;
     refreshVisionIndicators();
   },
   onMarkerRaised: (markerIds, at) => handleMarkerRaises(markerIds, at),
@@ -172,7 +180,11 @@ function render() {
         <section class="camera-panel panel">
           <div class="panel-heading">
             <div><span class="eyebrow">VISUAL BIDDING</span><h2>ArUco card scanner</h2></div>
-            <div class="marker-tools"><span class="privacy-chip">ON DEVICE</span><button class="text-button" data-action="print-bid-cards">${icon("print")} Print cards</button></div>
+            <div class="marker-tools">
+              <span class="privacy-chip">ON DEVICE</span>
+              <button class="range-button ${farRoomEnabled ? "is-active" : ""}" data-action="toggle-far-room" title="${farRoomEnabled ? "Return to the normal 640px scanner" : "Use 1024px scanning for distant cards"}">${icon("expand")} ${farRoomEnabled ? "FAR · 1024PX" : "FAR ROOM"}</button>
+              <button class="text-button" data-action="print-bid-cards">${icon("print")} Print cards</button>
+            </div>
           </div>
           <div class="video-wrap ${cameraEnabled ? "camera-active" : ""}">
             <video id="room-video" autoplay muted playsinline></video>
@@ -190,7 +202,7 @@ function render() {
             <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>
             <div><small>${micEnabled ? "OPENAI HEARD IN THE ROOM" : "VOICE INPUT"}</small><p id="live-transcript">${escapeHtml(lastTranscript)}</p></div>
           </div>
-          <p class="camera-note">Hold a card up to bid the next legal amount, then lower it before bidding again. Frames are analyzed locally at low resolution; camera video never leaves this Mac.</p>
+          <p class="camera-note">Hold a card up to bid the next legal amount, then lower it before bidding again. Far Room scans at 1024px for distant cards; camera video never leaves this Mac.</p>
         </section>
 
         <section class="auction-stage">
@@ -473,6 +485,7 @@ function wireGlobalEvents() {
       if (action === "dismiss-notice") return showNotice(null);
       if (action === "microphone") return toggleMicrophone();
       if (action === "camera") return toggleCamera();
+      if (action === "toggle-far-room") return toggleFarRoomMode();
       if (action === "print-bid-cards") return printBidCards();
       if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) speechSynthesis.cancel(); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
@@ -959,6 +972,16 @@ async function toggleCamera() {
   }
 }
 
+function toggleFarRoomMode() {
+  farRoomEnabled = !farRoomEnabled;
+  localStorage.setItem(FAR_ROOM_STORAGE_KEY, String(farRoomEnabled));
+  const profile = visionScanProfile(farRoomEnabled);
+  markerVision.setProfile(profile);
+  visionState.scanWidth = profile.width;
+  visionState.scanFps = profile.fps;
+  render();
+}
+
 function printBidCards() {
   const printWindow = window.open("", "sun-god-bid-cards");
   if (!printWindow) throw new Error("Allow pop-ups for localhost so Sun God can open the printable cards.");
@@ -1051,15 +1074,19 @@ function visionStatusLabel() {
   if (visionState.status === "error") return "SCANNER ERROR";
   if (visualBidWindow) return "CHECKING TIE WINDOW";
   if (pendingVisualTie) return `RUNOFF · $${pendingVisualTie.amount}`;
-  return cameraEnabled ? "MARKER BIDDING ACTIVE" : "STANDBY";
+  if (cameraEnabled) return farRoomEnabled ? "MARKER BIDDING · FAR 1024PX" : "MARKER BIDDING · 640PX";
+  return farRoomEnabled ? "FAR ROOM · 1024PX" : "STANDBY";
 }
 
 function markerStatusContent() {
-  if (!cameraEnabled) return `<span class="marker-empty">Cards #0–#${state.teams.length - 1} are ready to print.</span>`;
+  const profile = visionScanProfile(farRoomEnabled);
+  const scanWidth = visionState.scanWidth || profile.width;
+  const scanFps = visionState.scanFps || profile.fps;
+  if (!cameraEnabled) return `<span class="marker-empty">Cards #0–#${state.teams.length - 1} ready · scanner ${scanWidth}px at ${scanFps} FPS.</span>`;
   if (visualBidWindow) return `<span class="marker-empty is-active">Card raised · checking the 300 ms simultaneous-bid window…</span>`;
   if (!visionState.visibleMarkerIds.length) {
     const timing = visionState.detectionMs ? ` · ${Math.round(visionState.detectionMs)} ms/frame` : "";
-    return `<span class="marker-empty">Watching for cards at 8 FPS${timing}</span>`;
+    return `<span class="marker-empty">Watching at ${scanWidth}px · ${scanFps} FPS${timing}</span>`;
   }
   return visionState.visibleMarkerIds.map((markerId) => {
     const team = teamForMarkerId(state.teams, markerId);
@@ -1137,6 +1164,7 @@ function icon(name) {
     check: '<path d="m5 12 4 4L19 6"/>',
     alert: '<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5m0 3h.01"/>',
     print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/>',
+    expand: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 6-6m12 6-6-6M3 16l6 6m12-6-6 6"/>',
     cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>'
   };
   return `<svg class="icon icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;

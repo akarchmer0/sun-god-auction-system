@@ -4,10 +4,12 @@ import { generateArucoCardSvg } from "../src/aruco-vision.mjs";
 import {
   MarkerRaiseLatch,
   VISUAL_BID_WINDOW_MS,
+  VISION_SCAN_PROFILES,
   classifyVisualBidBatch,
   markerIdForTeam,
   nextVisualBidAmount,
-  teamForMarkerId
+  teamForMarkerId,
+  visionScanProfile
 } from "../src/vision-bidding.mjs";
 
 const teams = [
@@ -36,6 +38,11 @@ test("the visual bid amount is always the next legal increment", () => {
   assert.equal(nextVisualBidAmount({ auction: { amount: 0 }, config: { increment: 2 } }), 2);
   assert.equal(nextVisualBidAmount({ auction: { amount: 14 }, config: { increment: 2 } }), 16);
   assert.equal(VISUAL_BID_WINDOW_MS, 300);
+});
+
+test("far-room mode trades frame rate for a 1024-pixel scan", () => {
+  assert.deepEqual(visionScanProfile(false), VISION_SCAN_PROFILES.normal);
+  assert.deepEqual(visionScanProfile(true), { key: "far", width: 1024, fps: 5 });
 });
 
 test("a card must be stable before it fires and stays latched while raised", () => {

@@ -22,11 +22,11 @@ The camera is now a complete bid input, not just a preview. Sun God assigns ArUc
 
 1. Finish the team order in **League setup**.
 2. Click **Print cards** in the visual-bidding panel. Sun God creates two large cards per landscape letter sheet with the manager and team already labeled.
-3. Put the MacBook where its camera can see every bidder and click **Enable card bidding**.
+3. Put the MacBook where its camera can see every bidder. If the cards are across a large room, click **Far room** to enable the 1024px scanner, then click **Enable card bidding**.
 4. A manager holds their card flat toward the camera to bid the next legal increment. The colored outline and manager label confirm the card was found.
 5. Lower the card for at least half a second before using it again. A held card cannot accidentally place repeated bids.
 
-The detector downsizes camera frames to 640 pixels and scans at 8 FPS. A marker must survive two sightings before it counts, which filters brief false detections while keeping the load modest enough for a MacBook Air. Detection uses the `ARUCO_MIP_36h12` dictionary from the MIT-licensed [js-aruco2](https://github.com/damianofalcioni/js-aruco2) implementation, vendored into the app so it does not need a CDN or internet connection.
+Normal mode downsizes camera frames to 640 pixels and scans at 8 FPS. **Far room** switches to 1024 pixels at 5 FPS, trading some frame rate for the extra detail needed to read more distant cards; the choice persists after a reload. A marker must survive two sightings before it counts, which filters brief false detections while keeping the load modest enough for a MacBook Air. Detection uses the `ARUCO_MIP_36h12` dictionary from the MIT-licensed [js-aruco2](https://github.com/damianofalcioni/js-aruco2) implementation, vendored into the app so it does not need a CDN or internet connection.
 
 When multiple stable cards arrive within the same 300 ms window, Sun God pauses the countdown and announces a tie at the next bid amount. Only the tied managers are eligible for the runoff: they lower their cards, then raise again. If the runoff ties again, they can repeat it or the laptop operator can award the bid using the on-screen buttons.
 

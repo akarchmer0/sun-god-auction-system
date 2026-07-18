@@ -75,6 +75,10 @@ button { color: inherit; }
 .marker-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .marker-tools .text-button { font-size: 8px; }
 .marker-tools .icon { width: 12px; }
+.range-button { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 7px; background: transparent; color: var(--paper); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .07em; cursor: pointer; }
+.range-button:hover { background: #fff9ed; }
+.range-button.is-active { background: var(--paper); color: #f6eedc; box-shadow: 3px 3px 0 var(--orange); }
+.range-button .icon { width: 11px; height: 11px; }
 
 .camera-panel { grid-area: camera; padding-bottom: 20px; }
 .video-wrap { margin: 0 18px; aspect-ratio: 16/9; max-height: 370px; overflow: hidden; background: #121210; border: 1px solid #2c2c29; border-radius: 8px; position: relative; }

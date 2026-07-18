@@ -1,4 +1,12 @@
 export const VISUAL_BID_WINDOW_MS = 300;
+export const VISION_SCAN_PROFILES = Object.freeze({
+  normal: Object.freeze({ key: "normal", width: 640, fps: 8 }),
+  far: Object.freeze({ key: "far", width: 1024, fps: 5 })
+});
+
+export function visionScanProfile(farRoomEnabled = false) {
+  return farRoomEnabled ? VISION_SCAN_PROFILES.far : VISION_SCAN_PROFILES.normal;
+}
 
 export function teamForMarkerId(teams, markerId) {
   const id = Number(markerId);
