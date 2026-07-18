@@ -181,12 +181,26 @@ function normalizeTeams(teams) {
 
 function normalizeLiveTeams(teams, roomTeams) {
   const allowed = new Set(roomTeams.map((team) => team.id));
-  return Array.isArray(teams) ? teams.filter((team) => allowed.has(team?.id)).map((team) => ({
-    id: team.id,
-    budget: boundedNumber(team.budget),
-    rosterCount: boundedNumber(team.rosterCount),
-    rosterSize: boundedNumber(team.rosterSize),
-    maxBid: boundedNumber(team.maxBid)
+  return Array.isArray(teams) ? teams.filter((team) => allowed.has(team?.id)).map((team) => {
+    const roster = normalizeRoster(team.roster);
+    return {
+      id: team.id,
+      budget: boundedNumber(team.budget),
+      rosterCount: boundedNumber(team.rosterCount ?? roster.length),
+      rosterSize: boundedNumber(team.rosterSize),
+      maxBid: boundedNumber(team.maxBid),
+      roster
+    };
+  }) : [];
+}
+
+function normalizeRoster(roster) {
+  return Array.isArray(roster) ? roster.slice(0, 40).map((player) => ({
+    playerId: cleanText(player?.playerId, 100),
+    name: cleanText(player?.name, 140) || "Unknown player",
+    position: cleanText(player?.position, 20) || "FLEX",
+    nflTeam: cleanText(player?.nflTeam, 20) || "FA",
+    price: boundedNumber(player?.price)
   })) : [];
 }
 

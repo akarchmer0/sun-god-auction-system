@@ -1004,7 +1004,17 @@ async function syncPhoneRoomState() {
         budget: team.budget,
         rosterCount: team.roster.length,
         rosterSize: state.config.rosterSize,
-        maxBid: maxBidForTeam(state, team.id)
+        maxBid: maxBidForTeam(state, team.id),
+        roster: team.roster.map((spot) => {
+          const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
+          return {
+            playerId: spot.playerId,
+            name: rosterPlayer?.name || "Unknown player",
+            position: rosterPlayer?.position || "FLEX",
+            nflTeam: rosterPlayer?.nflTeam || "FA",
+            price: spot.price
+          };
+        })
       }))
     });
   } catch (error) {

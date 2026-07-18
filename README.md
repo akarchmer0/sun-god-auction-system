@@ -23,7 +23,7 @@ The laptop creates a private room code and a join link using its local network a
 1. Finish the team order in **League setup**.
 2. Each participant scans the QR code in the **Phone bidding** panel.
 3. The participant chooses their manager. Sun God prevents another phone from claiming the same team.
-4. During an auction, the phone shows the player, current bid, budget, maximum legal bid, roster count, and one large **Bid** button.
+4. During an auction, the phone's **Auction** tab shows the player, current bid, budget, maximum legal bid, roster count, and one large **Bid** button. The **Roster** tab lists every purchased player and price.
 5. The laptop receives the bid, enforces the increment and budget, announces it, and updates every phone.
 
 Bid requests are timestamped when the Sun God server receives them. Bids that arrive inside the same 300 ms window pause the auction and display both managers, allowing the laptop operator to award the bid without silently choosing based on network order.

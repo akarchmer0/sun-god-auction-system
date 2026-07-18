@@ -39,6 +39,10 @@ button { color: inherit; }
 .phone-team-header strong { margin-top: 5px; font-size: 17px; line-height: 1; }
 .phone-team-header b { margin-top: 4px; color: #746a5a; font-size: 9px; }
 .phone-team-header button { border: 0; background: none; color: #746a5a; font-size: 9px; text-decoration: underline; }
+.phone-tabs { min-height: 43px; margin-top: 17px; border: 1px solid #211c15; border-radius: 7px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #eadfc9; }
+.phone-tabs button { border: 0; border-radius: 4px; background: transparent; color: #746a5a; font-size: 10px; font-weight: 800; cursor: pointer; }
+.phone-tabs button.is-active { background: #17130e; color: #f6eedc; }
+.phone-tabs button b { min-width: 17px; height: 17px; margin-left: 5px; border: 1px solid currentColor; border-radius: 9px; display: inline-grid; place-items: center; font: 600 7px/1 "DM Mono", monospace; }
 .phone-lot { flex: 1; min-height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .phone-lot h1 { max-width: 340px; margin: 9px 0 20px; font-size: clamp(38px, 12vw, 62px); line-height: .94; letter-spacing: -.065em; }
 .phone-price small { display: block; color: #746a5a; font: 600 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
@@ -55,5 +59,22 @@ button { color: inherit; }
 .phone-budget span:last-child { border: 0; }
 .phone-budget small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .11em; }
 .phone-budget strong { margin-top: 5px; font-size: 15px; }
+.phone-roster-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.phone-roster-title { padding: 25px 2px 17px; border-bottom: 1px solid #211c15; }
+.phone-roster-title h1 { margin: 7px 0 5px; font-size: 31px; line-height: 1; letter-spacing: -.045em; }
+.phone-roster-title p { margin: 0; color: #746a5a; font-size: 10px; line-height: 1.45; }
+.phone-roster-view .phone-budget { margin-top: 12px; flex: 0 0 66px; min-height: 66px; }
+.phone-roster-list { flex: 1; min-height: 150px; margin-top: 12px; border-top: 1px solid #211c15; overflow-y: auto; overscroll-behavior: contain; }
+.phone-roster-row { min-height: 59px; border-bottom: 1px solid #211c15; display: grid; grid-template-columns: 22px 36px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.roster-index { color: #746a5a; font: 500 7px/1 "DM Mono", monospace; }
+.roster-position { height: 25px; border: 1px solid #211c15; border-radius: 4px; display: grid; place-items: center; background: color-mix(in srgb, var(--team), #f6eedc 78%); font: 700 8px/1 "DM Mono", monospace; }
+.roster-player { min-width: 0; }
+.roster-player strong, .roster-player small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-player strong { font-size: 12px; }
+.roster-player small { margin-top: 4px; color: #746a5a; font: 600 7px/1 "DM Mono", monospace; }
+.phone-roster-row > b { font: 700 13px/1 "DM Mono", monospace; }
+.phone-roster-empty { min-height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #746a5a; }
+.phone-roster-empty strong { color: #17130e; font-size: 14px; }
+.phone-roster-empty span { max-width: 230px; margin-top: 6px; font-size: 10px; line-height: 1.45; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 620px) { body { display: grid; place-items: center; padding: 24px; } .bidder-shell { width: 430px; min-height: min(860px, calc(100dvh - 48px)); border: 1px solid #211c15; box-shadow: 14px 14px 0 rgba(23,19,14,.18); } .bidder-room { min-height: 700px; } }
