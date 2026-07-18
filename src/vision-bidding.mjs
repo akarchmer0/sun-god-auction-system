@@ -30,6 +30,15 @@ export function classifyVisualBidBatch(teamIds) {
   return { kind: "tie", teamIds: uniqueTeamIds };
 }
 
+export function bidsShareWindow(firstReceivedAt, nextReceivedAt, windowMs = VISUAL_BID_WINDOW_MS) {
+  const first = Number(firstReceivedAt);
+  const next = Number(nextReceivedAt);
+  return Number.isFinite(first)
+    && Number.isFinite(next)
+    && next >= first
+    && next - first <= windowMs;
+}
+
 export class MarkerRaiseLatch {
   constructor({ stableMs = 90, releaseMs = 550 } = {}) {
     this.stableMs = stableMs;

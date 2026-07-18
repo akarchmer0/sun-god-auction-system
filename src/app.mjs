@@ -3,14 +3,11 @@ import { parseSpokenBid } from "./bid-voice.mjs";
 import { hasPotentialBidSignal, normalizeCloudAuctionIntent } from "./auction-intent.mjs";
 import { RealtimeTranscriber } from "./realtime-transcriber.mjs";
 import { VoiceIdentityService } from "./voice-identity.mjs";
-import { ArucoVision, generateArucoCardSvg } from "./aruco-vision.mjs";
 import {
   VISUAL_BID_WINDOW_MS,
+  bidsShareWindow,
   classifyVisualBidBatch,
-  markerIdForTeam,
-  nextVisualBidAmount,
-  teamForMarkerId,
-  visionScanProfile
+  nextVisualBidAmount
 } from "./vision-bidding.mjs";
 import {
   createDraft,
@@ -27,17 +24,15 @@ import {
 
 const STORAGE_KEY = "gavel-draft-v1";
 const CLOUD_INTERPRETER_STORAGE_KEY = "gavel-cloud-interpreter-enabled";
-const FAR_ROOM_STORAGE_KEY = "sun-god-far-room-enabled";
+const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
+const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({ players: seedPlayers, teams: makeTeams(), budget: 200, rosterSize: 15 });
 let armedTeamId = state.teams[0]?.id || null;
 let micEnabled = false;
-let cameraEnabled = false;
-let farRoomEnabled = localStorage.getItem(FAR_ROOM_STORAGE_KEY) === "true";
 let voiceEnabled = true;
 let autoEnabled = true;
-let cameraStream = null;
 let countdownTimer = null;
 let lastTranscript = "Say “bid” or use a team button";
 let notice = null;
@@ -45,6 +40,16 @@ let voiceDialogOpen = false;
 let pendingVoiceBid = null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
+let phoneRoomEvents = null;
+let phoneRoomSyncTimer = null;
+let phoneRoom = {
+  roomId: localStorage.getItem(PHONE_ROOM_ID_STORAGE_KEY) || createRoomCode(),
+  hostKey: localStorage.getItem(PHONE_ROOM_HOST_KEY_STORAGE_KEY) || createHostKey(),
+  status: "starting",
+  joinUrl: "",
+  claimedTeamIds: [],
+  error: null
+};
 let cloudInterpreter = {
   status: "checking",
   enabled: localStorage.getItem(CLOUD_INTERPRETER_STORAGE_KEY) !== "false",
@@ -67,37 +72,6 @@ let voiceState = {
   isRecognizing: false,
   latestScores: {}
 };
-let visionState = {
-  status: "standby",
-  visibleMarkerIds: [],
-  detectionMs: 0,
-  scanWidth: visionScanProfile(farRoomEnabled).width,
-  scanFps: visionScanProfile(farRoomEnabled).fps,
-  error: null
-};
-const markerVision = new ArucoVision({
-  ...visionScanProfile(farRoomEnabled),
-  onDetections: (markers, stats) => {
-    visionState.visibleMarkerIds = [...new Set(markers.map((marker) => marker.id))].sort((a, b) => a - b);
-    visionState.detectionMs = stats.detectionMs;
-    visionState.scanWidth = stats.width || visionState.scanWidth;
-    visionState.scanFps = stats.fps || visionState.scanFps;
-    refreshVisionIndicators();
-  },
-  onMarkerRaised: (markerIds, at) => handleMarkerRaises(markerIds, at),
-  onStateChange: (snapshot) => {
-    visionState = { ...visionState, ...snapshot };
-    refreshVisionIndicators();
-    if (snapshot.status === "error") {
-      showNotice({ kind: "error", message: snapshot.error || "Marker detection stopped." });
-    }
-  },
-  labelForMarker: (markerId) => {
-    const team = teamForMarkerId(state.teams, markerId);
-    return team ? `${team.manager} · #${markerId}` : `Unknown #${markerId}`;
-  },
-  colorForMarker: (markerId) => teamForMarkerId(state.teams, markerId)?.color || "#f05d23"
-});
 const voiceIdentity = new VoiceIdentityService({
   onStateChange: (snapshot) => {
     const structuralChange = snapshot.status !== voiceState.status
@@ -139,6 +113,7 @@ wireGlobalEvents();
 voiceIdentity.loadStoredProfiles().catch((error) => showNotice({ kind: "error", message: error.message }));
 refreshCloudInterpreter();
 refreshTranscriptionService();
+void initializePhoneRoom();
 
 function render() {
   const player = currentPlayer(state);
@@ -166,7 +141,7 @@ function render() {
         <div class="device-controls">
           <button class="device-button ${micEnabled ? "is-on" : ""}" data-action="microphone" title="Toggle OpenAI bid listening">${icon("mic")} <span>${microphoneLabel()}</span></button>
           <button class="device-button voice-id-button ${voiceState.isRecognizing ? "is-on" : ""}" data-action="voice-setup" title="Enroll and manage manager voices">${icon("fingerprint")} <span id="voice-id-label">${voiceBadgeLabel()}</span></button>
-          <button class="device-button ${cameraEnabled ? "is-on" : ""}" data-action="camera" title="Toggle ArUco card bidding">${icon("camera")} <span>${cameraEnabled ? "Cards on" : "Cards off"}</span></button>
+          <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="Toggle auctioneer voice">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
@@ -177,35 +152,36 @@ function render() {
       ${pendingVisualTie ? visualTieConfirmation() : ""}
 
       <main class="draft-grid">
-        <section class="camera-panel panel">
+        <section id="phone-room-panel" class="phone-room-panel panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">VISUAL BIDDING</span><h2>ArUco card scanner</h2></div>
-            <div class="marker-tools">
-              <span class="privacy-chip">ON DEVICE</span>
-              <button class="text-button" data-action="print-bid-cards">${icon("print")} Print cards</button>
+            <div><span class="eyebrow">PHONE BIDDING</span><h2>Draft room</h2></div>
+            <span class="phone-room-status ${phoneRoom.status === "live" ? "is-live" : ""}"><i></i>${phoneRoomStatusLabel()}</span>
+          </div>
+          <div class="phone-join-card">
+            <div class="phone-qr">${phoneRoom.joinUrl ? qrCodeSvg(phoneRoom.joinUrl) : `<span>${icon("phone")}</span>`}</div>
+            <div class="phone-join-copy">
+              <small>ROOM CODE</small>
+              <strong>${escapeHtml(phoneRoom.roomId)}</strong>
+              <p>${phoneRoom.joinUrl ? "Scan to join on the same Wi-Fi." : "Preparing the phone room…"}</p>
+              <span title="${escapeHtml(phoneRoom.joinUrl)}">${escapeHtml(phoneRoom.joinUrl || "Finding this Mac’s network address…")}</span>
             </div>
           </div>
-          <div class="video-wrap ${cameraEnabled ? "camera-active" : ""}">
-            <video id="room-video" autoplay muted playsinline></video>
-            <canvas id="marker-overlay" class="marker-overlay" aria-hidden="true"></canvas>
-            <div class="video-empty">
-              ${icon("camera")}
-              <strong>Card scanner is off</strong>
-              <span>Print one marker per manager, then point the camera at the room.</span>
-              <button data-action="camera">Enable card bidding</button>
-            </div>
-            <div class="camera-status"><i></i><span id="vision-status-label">${visionStatusLabel()}</span></div>
+          <div class="phone-room-actions">
+            <button data-action="copy-phone-link" ${phoneRoom.joinUrl ? "" : "disabled"}>${icon("copy")} Copy join link</button>
+            <button data-action="reset-phone-claims" ${phoneRoom.claimedTeamIds.length ? "" : "disabled"}>Reset phones</button>
           </div>
-          <button class="scanner-mode-button ${farRoomEnabled ? "is-active" : ""}" data-action="toggle-far-room" aria-pressed="${farRoomEnabled}" title="${farRoomEnabled ? "Return to the normal 640px scanner" : "Use 1024px scanning for distant cards"}">
-            <span class="scanner-mode-name">${icon("expand")}<span><small>SCAN RANGE</small><strong>Far room mode</strong></span></span>
-            <span class="scanner-mode-state">${farRoomEnabled ? "ON · 1024PX" : "OFF · 640PX"}</span>
-          </button>
-          <div id="marker-status" class="marker-strip">${markerStatusContent()}</div>
+          <div class="phone-claim-summary"><span>PARTICIPANTS</span><strong>${phoneRoom.claimedTeamIds.length}/${state.teams.length} joined</strong></div>
+          <div class="phone-claim-grid">
+            ${state.teams.map((team) => {
+              const joined = phoneRoom.claimedTeamIds.includes(team.id);
+              return `<div class="phone-claim ${joined ? "is-joined" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${joined ? "PHONE READY" : "WAITING"}</small></span>${icon(joined ? "check" : "phone")}</div>`;
+            }).join("")}
+          </div>
           <div class="listener-card ${micEnabled ? "is-listening" : ""}">
             <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>
             <div><small>${micEnabled ? "OPENAI HEARD IN THE ROOM" : "VOICE INPUT"}</small><p id="live-transcript">${escapeHtml(lastTranscript)}</p></div>
           </div>
-          <p class="camera-note">Hold a card up to bid the next legal amount, then lower it before bidding again. Far Room scans at 1024px for distant cards; camera video never leaves this Mac.</p>
+          <p class="camera-note">Each manager scans once, chooses their team, and taps one large bid button. The laptop remains authoritative for increments, budgets, rosters, and simultaneous bids.</p>
         </section>
 
         <section class="auction-stage">
@@ -239,7 +215,7 @@ function render() {
           <div class="team-grid">
             ${state.teams.map((team, index) => teamBidButton(team, index)).join("")}
           </div>
-          <div class="keyboard-hint"><kbd>1</kbd>–<kbd>${Math.min(9, state.teams.length)}</kbd> quick bid <span>•</span> ArUco cards <kbd>#0</kbd>–<kbd>#${state.teams.length - 1}</kbd> map to managers in this order</div>
+          <div class="keyboard-hint"><kbd>1</kbd>–<kbd>${Math.min(9, state.teams.length)}</kbd> quick bid <span>•</span> Joined phones bid directly for their selected manager</div>
         </section>
 
         <aside class="ledger-panel panel">
@@ -257,20 +233,11 @@ function render() {
     <dialog id="voice-dialog" class="voice-dialog">${voiceSetupDialog()}</dialog>
   `;
 
-  if (cameraEnabled && cameraStream) {
-    const video = document.querySelector("#room-video");
-    const overlay = document.querySelector("#marker-overlay");
-    if (video) {
-      video.srcObject = cameraStream;
-      markerVision.attach(video, overlay);
-    }
-  }
   if (voiceDialogOpen) {
     const dialog = document.querySelector("#voice-dialog");
     if (dialog && !dialog.open) dialog.showModal();
   }
   refreshVoiceIndicators();
-  refreshVisionIndicators();
 }
 
 function playerCard(player, highBidder) {
@@ -327,6 +294,7 @@ function teamBidButton(team, index) {
   const isEnrolled = voiceState.profileTeamIds.includes(team.id);
   const voiceScore = voiceState.latestScores[team.id] || 0;
   const maxBid = maxBidForTeam(state, team.id);
+  const phoneJoined = phoneRoom.claimedTeamIds.includes(team.id);
   const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || maxBid < Math.max(1, state.auction.amount + state.config.increment);
   return `<button class="team-bid ${isHigh ? "is-high" : ""} ${isArmed ? "is-armed" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" ${disabled ? "disabled" : ""}>
     <span class="team-key" title="Keyboard shortcut ${index < 9 ? index + 1 : "unassigned"}">${index < 9 ? index + 1 : ""}</span>
@@ -334,7 +302,7 @@ function teamBidButton(team, index) {
     <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
     <span class="team-money"><strong>$${team.budget}</strong><small>max $${maxBid}</small></span>
     <span class="armed-label">${isHigh ? "HIGH BID" : isArmed ? "VOICE ARMED" : "+ BID"}</span>
-    <span class="marker-badge" title="ArUco bid card #${index}">#${index}</span>
+    <span class="phone-bid-badge" title="${phoneJoined ? "Phone connected" : "Waiting for phone"}">${phoneJoined ? "PHONE READY" : "NO PHONE"}</span>
     <span class="voice-profile-dot ${isEnrolled ? "is-enrolled" : ""}" data-voice-dot="${team.id}" style="--voice-score:${Math.round(voiceScore * 100)}%" title="${isEnrolled ? `Voice enrolled · ${Math.round(voiceScore * 100)}% last match` : "Voice not enrolled"}">${icon("fingerprint")}</span>
   </button>`;
 }
@@ -365,7 +333,7 @@ function voiceSetupDialog() {
   const enrolledCount = state.teams.filter((team) => voiceState.profileTeamIds.includes(team.id)).length;
   return `<div class="voice-setup">
     <div class="dialog-head"><div><span class="eyebrow">PRIVATE VOICE CHECK-IN</span><h2>Recognize every manager</h2></div><button type="button" data-action="close-voice-setup" class="dialog-close" aria-label="Close">×</button></div>
-    <p class="voice-intro">Each manager speaks for six seconds to create a local voiceprint. Raw enrollment audio is discarded after local processing. When the main microphone is on, detected speech is transcribed by OpenAI; camera video and voiceprints stay on this Mac. The bid interpreter receives only the final text plus auction context. Always get everyone’s consent before enrolling.</p>
+    <p class="voice-intro">Each manager speaks for six seconds to create a local voiceprint. Raw enrollment audio is discarded after local processing. When the main microphone is on, detected speech is transcribed by OpenAI; voiceprints stay on this Mac. The bid interpreter receives only the final text plus auction context. Always get everyone’s consent before enrolling.</p>
     ${transcriptionCard()}
     ${cloudInterpreterCard()}
     ${!voiceIdentity.isSupported ? `<div class="voice-error">Speaker recognition is unavailable in this browser. Use a current version of Chrome, Safari, Firefox, or Edge.</div>` : ""}
@@ -455,10 +423,10 @@ function visualTieConfirmation() {
   const teams = pendingVisualTie.teamIds
     .map((teamId) => state.teams.find((team) => team.id === teamId))
     .filter(Boolean);
-  const repeated = pendingVisualTie.round > 1;
+  const fromPhones = pendingVisualTie.source === "phone";
   return `<div class="visual-tie-confirmation">
-    <div>${icon("cards")}<span><small>${repeated ? "STILL TIED" : "SIMULTANEOUS CARDS"} · AUCTION PAUSED</small><strong>$${pendingVisualTie.amount} between ${escapeHtml(teams.map((team) => team.manager).join(", "))}</strong></span></div>
-    <p>${repeated ? "Lower and re-raise again, or let the operator award the bid." : "Tied managers: lower your cards, then raise again."}</p>
+    <div>${icon(fromPhones ? "phone" : "cards")}<span><small>${fromPhones ? "SIMULTANEOUS PHONE BIDS" : "SIMULTANEOUS CARDS"} · AUCTION PAUSED</small><strong>$${pendingVisualTie.amount} between ${escapeHtml(teams.map((team) => team.manager).join(", "))}</strong></span></div>
+    <p>${fromPhones ? "Both bids landed inside the 300 ms tie window. The auctioneer can award the bid without guessing from network order." : "Tied managers: lower your cards, then raise again."}</p>
     <div class="visual-tie-actions">
       ${teams.map((team) => `<button data-action="resolve-visual-tie" data-team-id="${team.id}"><i style="background:${team.color}"></i>Award ${escapeHtml(team.manager)}</button>`).join("")}
       <button class="reject" data-action="cancel-visual-tie">Cancel</button>
@@ -487,9 +455,9 @@ function wireGlobalEvents() {
       if (action === "cancel-visual-tie") return cancelVisualTie();
       if (action === "dismiss-notice") return showNotice(null);
       if (action === "microphone") return toggleMicrophone();
-      if (action === "camera") return toggleCamera();
-      if (action === "toggle-far-room") return toggleFarRoomMode();
-      if (action === "print-bid-cards") return printBidCards();
+      if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (action === "copy-phone-link") return copyPhoneJoinLink();
+      if (action === "reset-phone-claims") return resetPhoneClaims();
       if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) speechSynthesis.cancel(); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
       if (action === "open") return beginAuction();
@@ -538,6 +506,7 @@ function wireGlobalEvents() {
     persistDraft();
     document.querySelector("#setup-dialog")?.close();
     render();
+    void initializePhoneRoom();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -863,12 +832,16 @@ function confirmPendingVoiceBid(teamId) {
   catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
 }
 
-function handleMarkerRaises(markerIds) {
-  if (!cameraEnabled || pendingVoiceBid || !["open", "once", "twice"].includes(state.auction.phase)) return;
+function handlePhoneBid(bid) {
+  if (!bid?.teamId || pendingVoiceBid || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
+  collectExternalBids([bid.teamId], "phone", bid.receivedAt);
+}
+
+function collectExternalBids(teamIds, source, receivedAt = Date.now()) {
   const amount = pendingVisualTie?.amount ?? nextVisualBidAmount(state);
   const allowedTeamIds = pendingVisualTie ? new Set(pendingVisualTie.teamIds) : null;
-  const eligibleTeamIds = markerIds
-    .map((markerId) => teamForMarkerId(state.teams, markerId)?.id)
+  const eligibleTeamIds = teamIds
     .filter((teamId) => teamId && (!allowedTeamIds || allowedTeamIds.has(teamId)))
     .filter((teamId) => canPlaceVisualBid(teamId, amount));
 
@@ -878,12 +851,13 @@ function handleMarkerRaises(markerIds) {
     visualBidWindow = {
       teamIds: new Set(),
       amount,
+      source,
+      openedAt: receivedAt,
       runoffRound: pendingVisualTie?.round || 0,
       timer: window.setTimeout(resolveVisualBidWindow, VISUAL_BID_WINDOW_MS)
     };
   }
   for (const teamId of eligibleTeamIds) visualBidWindow.teamIds.add(teamId);
-  refreshVisionIndicators();
 }
 
 function resolveVisualBidWindow() {
@@ -907,14 +881,16 @@ function resolveVisualBidWindow() {
   pendingVisualTie = {
     teamIds: result.teamIds,
     amount: batch.amount,
+    source: batch.source,
     round: batch.runoffRound + 1
   };
   render();
+  schedulePhoneRoomSync();
   const managers = result.teamIds
     .map((teamId) => state.teams.find((team) => team.id === teamId)?.manager)
     .filter(Boolean)
     .join(" and ");
-  speak(`Simultaneous bid at ${batch.amount} dollars between ${managers}. Lower your cards, then raise again.`);
+  speak(`Simultaneous bid at ${batch.amount} dollars between ${managers}. The auction is paused for a ruling.`);
 }
 
 function canPlaceVisualBid(teamId, amount) {
@@ -948,69 +924,118 @@ function clearVisualBidWindow() {
   visualBidWindow = null;
 }
 
-async function toggleCamera() {
-  if (cameraEnabled) {
-    markerVision.stop();
-    clearVisualBidWindow();
-    pendingVisualTie = null;
-    cameraStream?.getTracks().forEach((track) => track.stop());
-    cameraStream = null;
-    cameraEnabled = false;
-    render();
-    scheduleCountdown();
-    return;
-  }
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-    cameraEnabled = true;
-    render();
-    markerVision.start();
-  } catch (error) {
-    markerVision.stop();
-    cameraStream?.getTracks().forEach((track) => track.stop());
-    cameraStream = null;
-    cameraEnabled = false;
-    render();
-    showNotice({ kind: "error", message: error?.message || "Camera permission was denied or no camera is available." });
-  }
-}
-
-function toggleFarRoomMode() {
-  farRoomEnabled = !farRoomEnabled;
-  localStorage.setItem(FAR_ROOM_STORAGE_KEY, String(farRoomEnabled));
-  const profile = visionScanProfile(farRoomEnabled);
-  markerVision.setProfile(profile);
-  visionState.scanWidth = profile.width;
-  visionState.scanFps = profile.fps;
+async function initializePhoneRoom() {
+  phoneRoom.status = "starting";
+  phoneRoom.error = null;
+  localStorage.setItem(PHONE_ROOM_ID_STORAGE_KEY, phoneRoom.roomId);
+  localStorage.setItem(PHONE_ROOM_HOST_KEY_STORAGE_KEY, phoneRoom.hostKey);
   render();
+  try {
+    const snapshot = await postPhoneJson("/api/phone-room/upsert", {
+      roomId: phoneRoom.roomId,
+      hostKey: phoneRoom.hostKey,
+      teams: state.teams.map((team) => ({ id: team.id, name: team.name, manager: team.manager, color: team.color }))
+    });
+    applyPhoneRoomSnapshot(snapshot);
+    connectPhoneRoomEvents();
+    phoneRoom.status = "live";
+    render();
+    await syncPhoneRoomState();
+  } catch (error) {
+    phoneRoom.status = "error";
+    phoneRoom.error = error.message;
+    render();
+  }
 }
 
-function printBidCards() {
-  const printWindow = window.open("", "sun-god-bid-cards");
-  if (!printWindow) throw new Error("Allow pop-ups for localhost so Sun God can open the printable cards.");
-  const cards = state.teams.map((team) => {
-    const markerId = markerIdForTeam(state.teams, team.id);
-    return `<article class="card"><div class="marker">${generateArucoCardSvg(markerId)}</div><span>SUN GOD BID CARD · #${markerId}</span><h1>${escapeHtml(team.manager)}</h1><p>${escapeHtml(team.name)}</p><small>Hold the black-and-white marker flat toward the laptop camera.</small></article>`;
-  });
-  const sheets = [];
-  for (let index = 0; index < cards.length; index += 2) sheets.push(`<section class="sheet">${cards.slice(index, index + 2).join("")}</section>`);
-  printWindow.document.write(`<!doctype html><html><head><title>Sun God bid cards</title><style>
-    @page { size: letter landscape; margin: .3in; }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: Arial, sans-serif; }
-    .sheet { width: 10.4in; height: 7.9in; display: grid; grid-template-columns: 1fr 1fr; gap: .25in; page-break-after: always; }
-    .sheet:last-child { page-break-after: auto; }
-    .card { height: 7.9in; display: flex; flex-direction: column; align-items: center; border: 2px dashed #aaa; padding: .2in; text-align: center; }
-    .marker { width: 4.45in; height: 4.45in; flex: 0 0 auto; }
-    .marker svg { width: 100%; height: 100%; display: block; }
-    span { margin-top: .12in; font: 700 11pt monospace; letter-spacing: .08em; }
-    h1 { margin: .15in 0 0; font-size: 27pt; }
-    p { margin: .06in 0 0; font-size: 15pt; }
-    small { margin-top: auto; color: #555; font-size: 9pt; }
-    @media screen { body { padding: 20px; background: #ddd; } .sheet { margin: 0 auto 20px; background: white; box-shadow: 0 4px 20px #888; } }
-  </style></head><body>${sheets.join("")}</body></html>`);
-  printWindow.document.close();
-  window.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 250);
+function connectPhoneRoomEvents() {
+  phoneRoomEvents?.close();
+  phoneRoomEvents = new EventSource(`/api/phone-room/events?room=${encodeURIComponent(phoneRoom.roomId)}`);
+  for (const eventName of ["snapshot", "room", "state"]) {
+    phoneRoomEvents.addEventListener(eventName, (event) => {
+      const payload = JSON.parse(event.data);
+      applyPhoneRoomSnapshot(payload.room, { renderIfChanged: true });
+    });
+  }
+  phoneRoomEvents.addEventListener("bid", (event) => handlePhoneBid(JSON.parse(event.data)));
+  phoneRoomEvents.onopen = () => {
+    if (phoneRoom.status !== "live") { phoneRoom.status = "live"; phoneRoom.error = null; render(); }
+  };
+  phoneRoomEvents.onerror = () => {
+    if (phoneRoom.status !== "reconnecting") { phoneRoom.status = "reconnecting"; render(); }
+  };
+}
+
+function applyPhoneRoomSnapshot(snapshot, { renderIfChanged = false } = {}) {
+  if (!snapshot) return;
+  const claimedTeamIds = (snapshot.teams || []).filter((team) => team.claimed).map((team) => team.id);
+  const changed = claimedTeamIds.join(",") !== phoneRoom.claimedTeamIds.join(",")
+    || Boolean(snapshot.joinUrl && snapshot.joinUrl !== phoneRoom.joinUrl);
+  phoneRoom.joinUrl = snapshot.joinUrl || phoneRoom.joinUrl;
+  phoneRoom.claimedTeamIds = claimedTeamIds;
+  if (renderIfChanged && changed) render();
+}
+
+function schedulePhoneRoomSync() {
+  if (!phoneRoom.joinUrl || phoneRoom.status === "starting" || phoneRoom.status === "error") return;
+  if (phoneRoomSyncTimer) window.clearTimeout(phoneRoomSyncTimer);
+  phoneRoomSyncTimer = window.setTimeout(() => void syncPhoneRoomState(), 25);
+}
+
+async function syncPhoneRoomState() {
+  if (!phoneRoom.joinUrl) return;
+  if (phoneRoomSyncTimer) window.clearTimeout(phoneRoomSyncTimer);
+  phoneRoomSyncTimer = null;
+  const player = currentPlayer(state);
+  try {
+    await postPhoneJson("/api/phone-room/state", {
+      roomId: phoneRoom.roomId,
+      hostKey: phoneRoom.hostKey,
+      auction: {
+        phase: state.auction.phase,
+        amount: state.auction.amount,
+        nextBid: nextVisualBidAmount(state),
+        highBidderId: state.auction.highBidderId,
+        acceptingBids: ["open", "once", "twice"].includes(state.auction.phase) && !pendingVoiceBid && !pendingVisualTie,
+        player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam } : null
+      },
+      teams: state.teams.map((team) => ({
+        id: team.id,
+        budget: team.budget,
+        rosterCount: team.roster.length,
+        rosterSize: state.config.rosterSize,
+        maxBid: maxBidForTeam(state, team.id)
+      }))
+    });
+  } catch (error) {
+    phoneRoom.status = "reconnecting";
+    phoneRoom.error = error.message;
+    render();
+  }
+}
+
+async function copyPhoneJoinLink() {
+  if (!phoneRoom.joinUrl) return;
+  try {
+    await navigator.clipboard.writeText(phoneRoom.joinUrl);
+    showNotice({ kind: "success", message: "Phone join link copied." });
+  } catch {
+    window.prompt("Copy this phone join link:", phoneRoom.joinUrl);
+  }
+}
+
+async function resetPhoneClaims() {
+  const snapshot = await postPhoneJson("/api/phone-room/reset-claims", { roomId: phoneRoom.roomId, hostKey: phoneRoom.hostKey });
+  applyPhoneRoomSnapshot(snapshot);
+  render();
+  showNotice({ kind: "success", message: "All phones were disconnected from their teams." });
+}
+
+async function postPhoneJson(url, body) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "The phone bidding room is unavailable.");
+  return payload;
 }
 
 function renderSearchResults(query) {
@@ -1064,6 +1089,29 @@ function showNotice(nextNotice) {
 
 function persistDraft() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  schedulePhoneRoomSync();
+}
+
+function phoneRoomStatusLabel() {
+  if (phoneRoom.status === "live") return "LIVE";
+  if (phoneRoom.status === "reconnecting") return "RECONNECTING";
+  if (phoneRoom.status === "error") return "ROOM ERROR";
+  return "STARTING";
+}
+
+function qrCodeSvg(text) {
+  const QrCode = globalThis.qrcodegen?.QrCode;
+  if (!QrCode || !text) return "";
+  const qr = QrCode.encodeText(text, QrCode.Ecc.MEDIUM);
+  const border = 3;
+  const size = qr.size + border * 2;
+  let path = "";
+  for (let y = 0; y < qr.size; y += 1) {
+    for (let x = 0; x < qr.size; x += 1) {
+      if (qr.getModule(x, y)) path += `M${x + border},${y + border}h1v1h-1z`;
+    }
+  }
+  return `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="QR code for room ${escapeHtml(phoneRoom.roomId)}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff9ed"/><path d="${path}" fill="#17130e"/></svg>`;
 }
 
 function voiceBadgeLabel() {
@@ -1071,32 +1119,6 @@ function voiceBadgeLabel() {
   if (voiceState.status === "enrolling") return `Enrolling ${enrolled}/${state.teams.length}`;
   if (voiceState.isRecognizing) return `Identifying ${enrolled}/${state.teams.length}`;
   return enrolled ? `Voices ${enrolled}/${state.teams.length}` : "Enroll voices";
-}
-
-function visionStatusLabel() {
-  if (visionState.status === "error") return "SCANNER ERROR";
-  if (visualBidWindow) return "CHECKING TIE WINDOW";
-  if (pendingVisualTie) return `RUNOFF · $${pendingVisualTie.amount}`;
-  if (cameraEnabled) return farRoomEnabled ? "MARKER BIDDING · FAR 1024PX" : "MARKER BIDDING · 640PX";
-  return farRoomEnabled ? "FAR ROOM · 1024PX" : "STANDBY";
-}
-
-function markerStatusContent() {
-  const profile = visionScanProfile(farRoomEnabled);
-  const scanWidth = visionState.scanWidth || profile.width;
-  const scanFps = visionState.scanFps || profile.fps;
-  if (!cameraEnabled) return `<span class="marker-empty">Cards #0–#${state.teams.length - 1} ready · scanner ${scanWidth}px at ${scanFps} FPS.</span>`;
-  if (visualBidWindow) return `<span class="marker-empty is-active">Card raised · checking the 300 ms simultaneous-bid window…</span>`;
-  if (!visionState.visibleMarkerIds.length) {
-    const timing = visionState.detectionMs ? ` · ${Math.round(visionState.detectionMs)} ms/frame` : "";
-    return `<span class="marker-empty">Watching at ${scanWidth}px · ${scanFps} FPS${timing}</span>`;
-  }
-  return visionState.visibleMarkerIds.map((markerId) => {
-    const team = teamForMarkerId(state.teams, markerId);
-    return team
-      ? `<span class="marker-chip" style="--marker:${team.color}"><i></i>#${markerId} ${escapeHtml(team.manager)}</span>`
-      : `<span class="marker-chip is-unknown"><i></i>#${markerId} unassigned</span>`;
-  }).join("");
 }
 
 function microphoneLabel() {
@@ -1129,13 +1151,6 @@ function refreshVoiceIndicators() {
   }
 }
 
-function refreshVisionIndicators() {
-  const label = document.querySelector("#vision-status-label");
-  const strip = document.querySelector("#marker-status");
-  if (label) label.textContent = visionStatusLabel();
-  if (strip) strip.innerHTML = markerStatusContent();
-}
-
 function restoreDraft() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
 }
@@ -1148,6 +1163,16 @@ function slug(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+function createRoomCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+function createHostKey() {
+  return (crypto.randomUUID?.() || `host_${Date.now()}_${Math.random().toString(36).slice(2)}`).replaceAll("-", "_");
+}
+
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
@@ -1155,6 +1180,8 @@ function escapeHtml(value = "") {
 function icon(name) {
   const paths = {
     mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>',
+    phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 5h4M11 18h2"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     camera: '<path d="M14.5 5 13 3H7L5.5 5H3a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-6.5Z"/><circle cx="10" cy="12" r="4"/>',
     volume: '<path d="M11 5 6 9H2v6h4l5 4V5ZM15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',

@@ -5,6 +5,7 @@ import {
   MarkerRaiseLatch,
   VISUAL_BID_WINDOW_MS,
   VISION_SCAN_PROFILES,
+  bidsShareWindow,
   classifyVisualBidBatch,
   markerIdForTeam,
   nextVisualBidAmount,
@@ -74,4 +75,10 @@ test("a visual bid batch distinguishes one winner from a simultaneous tie", () =
   assert.deepEqual(classifyVisualBidBatch([]), { kind: "none", teamIds: [] });
   assert.deepEqual(classifyVisualBidBatch(["a", "a"]), { kind: "bid", teamIds: ["a"], teamId: "a" });
   assert.deepEqual(classifyVisualBidBatch(["a", "b", "a"]), { kind: "tie", teamIds: ["a", "b"] });
+});
+
+test("server timestamps determine whether phone bids share the tie window", () => {
+  assert.equal(bidsShareWindow(10_000, 10_300), true);
+  assert.equal(bidsShareWindow(10_000, 10_301), false);
+  assert.equal(bidsShareWindow(10_000, 9_999), false);
 });

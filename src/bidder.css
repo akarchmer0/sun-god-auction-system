@@ -1,0 +1,59 @@
+:root { color-scheme: light; font-family: "Manrope", system-ui, sans-serif; color: #17130e; background: #e9ddc4; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100dvh; background: #e9ddc4; }
+button, input { font: inherit; }
+button { color: inherit; }
+.bidder-shell { min-height: 100dvh; display: flex; flex-direction: column; background: #f6eedc; }
+.bidder-shell > header { height: 68px; padding: env(safe-area-inset-top) 18px 0; border-bottom: 1px solid #211c15; display: flex; align-items: center; gap: 9px; }
+.bidder-shell > header > span:nth-child(2) { flex: 1; }
+.bidder-shell > header strong { display: block; font-size: 15px; line-height: 1; }
+.bidder-shell > header small { display: block; margin-top: 4px; color: #746a5a; font: 500 7px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.phone-sun { width: 36px; height: 36px; display: block; }
+.phone-sun svg { width: 100%; height: 100%; }
+.connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #8f877a; }
+.connection-dot.is-live { background: #396b49; box-shadow: 0 0 0 5px rgba(57,107,73,.13); }
+.kicker { color: #746a5a; font: 600 9px/1 "DM Mono", monospace; letter-spacing: .16em; }
+.join-screen { width: min(100%, 430px); margin: auto; padding: 34px 24px 60px; text-align: center; }
+.join-screen h1, .team-choice h1 { margin: 10px 0 8px; font-size: 34px; line-height: 1; letter-spacing: -.05em; }
+.join-screen p, .team-choice > p { margin: 0 auto 24px; color: #746a5a; font-size: 13px; line-height: 1.5; }
+#room-code-form { display: grid; gap: 10px; }
+#room-code-form input { height: 66px; border: 1px solid #211c15; border-radius: 9px; background: #fff9ed; text-align: center; text-transform: uppercase; font: 700 27px/1 "DM Mono", monospace; letter-spacing: .2em; outline: none; }
+#room-code-form button, .wide-secondary { min-height: 52px; border: 1px solid #211c15; border-radius: 8px; background: #17130e; color: #f6eedc; font-weight: 800; cursor: pointer; }
+.link-button { border: 0; background: none; margin-top: 18px; color: #746a5a; font-size: 11px; text-decoration: underline; cursor: pointer; }
+.loader { width: 36px; height: 36px; display: block; margin: 0 auto 24px; border: 3px solid #d4c6a9; border-top-color: #17130e; border-radius: 50%; animation: spin .8s linear infinite; }
+.error-copy { color: #9d3c28 !important; }
+.team-choice { padding: 34px 18px max(34px, env(safe-area-inset-bottom)); }
+.phone-team-list { display: grid; gap: 8px; }
+.phone-team-list button { min-height: 66px; padding: 0 14px; border: 1px solid #211c15; border-radius: 8px; background: #fff9ed; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
+.phone-team-list button:disabled { opacity: .42; cursor: default; }
+.phone-team-list i { width: 11px; height: 38px; border-radius: 3px; }
+.phone-team-list span { flex: 1; }
+.phone-team-list strong, .phone-team-list small { display: block; }
+.phone-team-list strong { font-size: 14px; }
+.phone-team-list small { margin-top: 3px; color: #746a5a; font-size: 10px; }
+.phone-team-list b { font: 600 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.bidder-room { flex: 1; min-height: calc(100dvh - 68px); display: flex; flex-direction: column; padding: 18px 18px max(18px, env(safe-area-inset-bottom)); }
+.phone-team-header { display: flex; align-items: center; justify-content: space-between; border-left: 8px solid var(--team); padding: 4px 0 4px 11px; }
+.phone-team-header small, .phone-team-header strong, .phone-team-header b { display: block; }
+.phone-team-header small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.phone-team-header strong { margin-top: 5px; font-size: 17px; line-height: 1; }
+.phone-team-header b { margin-top: 4px; color: #746a5a; font-size: 9px; }
+.phone-team-header button { border: 0; background: none; color: #746a5a; font-size: 9px; text-decoration: underline; }
+.phone-lot { flex: 1; min-height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.phone-lot h1 { max-width: 340px; margin: 9px 0 20px; font-size: clamp(38px, 12vw, 62px); line-height: .94; letter-spacing: -.065em; }
+.phone-price small { display: block; color: #746a5a; font: 600 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
+.phone-price strong { display: block; margin-top: 3px; font-size: 78px; line-height: .95; letter-spacing: -.07em; }
+.phone-price sup { color: #d39a20; font-size: 25px; vertical-align: top; position: relative; top: 8px; }
+.phone-phase { margin-top: 13px; color: #746a5a; font: 600 9px/1 "DM Mono", monospace; letter-spacing: .13em; text-transform: uppercase; }
+.bid-button { width: 100%; min-height: 116px; border: 2px solid #17130e; border-radius: 14px; background: #d39a20; color: #17130e; box-shadow: 0 8px 0 #17130e; font-size: 33px; font-weight: 800; letter-spacing: -.04em; cursor: pointer; touch-action: manipulation; }
+.bid-button:active:not(:disabled) { transform: translateY(6px); box-shadow: 0 2px 0 #17130e; }
+.bid-button small { display: block; max-width: 280px; margin: 7px auto 0; font-size: 9px; font-weight: 600; letter-spacing: 0; }
+.bid-button:disabled { background: #d8cdb8; color: #766e61; border-color: #766e61; box-shadow: 0 6px 0 #766e61; cursor: default; }
+.bid-button.is-winning { background: #17130e; color: #f6eedc; border-color: var(--team); box-shadow: 0 7px 0 var(--team); }
+.phone-budget { min-height: 70px; margin-top: 18px; border: 1px solid #211c15; display: grid; grid-template-columns: repeat(3, 1fr); }
+.phone-budget span { display: grid; place-items: center; align-content: center; border-right: 1px solid #211c15; }
+.phone-budget span:last-child { border: 0; }
+.phone-budget small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .11em; }
+.phone-budget strong { margin-top: 5px; font-size: 15px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (min-width: 620px) { body { display: grid; place-items: center; padding: 24px; } .bidder-shell { width: 430px; min-height: min(860px, calc(100dvh - 48px)); border: 1px solid #211c15; box-shadow: 14px 14px 0 rgba(23,19,14,.18); } .bidder-room { min-height: 700px; } }

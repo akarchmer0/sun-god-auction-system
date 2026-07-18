@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 import { delimiter, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { networkInterfaces } from "node:os";
+import { PhoneRoomHub } from "./src/phone-room-hub.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
@@ -28,6 +30,7 @@ const mimeTypes = {
 };
 
 const speakerWorker = createSpeakerWorker();
+const phoneRoomHub = new PhoneRoomHub();
 
 const server = createServer(async (request, response) => {
   try {
@@ -54,6 +57,33 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/transcription/session") {
       return sendJson(response, 200, await createRealtimeTranscriptionSession());
+    }
+    if (request.method === "GET" && url.pathname === "/api/phone-room") {
+      const room = phoneRoomHub.snapshot(url.searchParams.get("room"));
+      return sendJson(response, 200, withJoinUrls(request, room));
+    }
+    if (request.method === "GET" && url.pathname === "/api/phone-room/events") {
+      return openPhoneRoomEvents(request, response, url.searchParams.get("room"));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/upsert") {
+      const payload = await readJsonRequest(request);
+      const room = phoneRoomHub.upsertRoom(payload);
+      return sendJson(response, 200, withJoinUrls(request, room));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/claim") {
+      return sendJson(response, 200, phoneRoomHub.claimTeam(await readJsonRequest(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/release") {
+      return sendJson(response, 200, phoneRoomHub.releaseTeam(await readJsonRequest(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/reset-claims") {
+      return sendJson(response, 200, phoneRoomHub.resetClaims(await readJsonRequest(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/state") {
+      return sendJson(response, 200, phoneRoomHub.updateAuction(await readJsonRequest(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/phone-room/bid") {
+      return sendJson(response, 202, phoneRoomHub.placeBid(await readJsonRequest(request)));
     }
     if (request.method !== "GET" && request.method !== "HEAD") return send(response, 405, "Method not allowed");
     await serveStatic(url.pathname, response, request.method === "HEAD");
@@ -184,8 +214,63 @@ async function readJsonRequest(request) {
   try {
     return JSON.parse(body.toString("utf8"));
   } catch {
-    throw apiError("The cloud interpreter request was not valid JSON.", 400);
+    throw apiError("The request was not valid JSON.", 400);
   }
+}
+
+function openPhoneRoomEvents(request, response, roomId) {
+  phoneRoomHub.requireRoom(roomId);
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  response.write(": Sun God phone room\n\n");
+  const unsubscribe = phoneRoomHub.subscribe(roomId, (event) => {
+    response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  });
+  const keepAlive = setInterval(() => response.write(": keepalive\n\n"), 20_000);
+  const close = () => {
+    clearInterval(keepAlive);
+    unsubscribe();
+  };
+  request.once("close", close);
+  response.once("close", close);
+}
+
+function withJoinUrls(request, room) {
+  const encodedRoom = encodeURIComponent(room.roomId);
+  const hostHeader = String(request.headers.host || `localhost:${port}`);
+  const requestedHostname = hostHeader.startsWith("[")
+    ? hostHeader.slice(1, hostHeader.indexOf("]"))
+    : hostHeader.split(":")[0];
+  const addresses = [
+    ...lanAddresses(),
+    ...(!["localhost", "127.0.0.1", "::1"].includes(requestedHostname) ? [requestedHostname] : [])
+  ];
+  const uniqueAddresses = [...new Set(addresses)];
+  const joinUrls = (uniqueAddresses.length ? uniqueAddresses : ["localhost"])
+    .map((address) => `http://${address.includes(":") ? `[${address}]` : address}:${port}/bidder.html?room=${encodedRoom}`);
+  return { ...room, joinUrl: joinUrls[0], joinUrls };
+}
+
+function lanAddresses() {
+  const addresses = [];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const address of entries || []) {
+      const isIpv4 = address.family === "IPv4" || address.family === 4;
+      if (isIpv4 && !address.internal) addresses.push(address.address);
+    }
+  }
+  return addresses.sort((left, right) => privateAddressRank(left) - privateAddressRank(right));
+}
+
+function privateAddressRank(address) {
+  if (/^192\.168\./.test(address)) return 0;
+  if (/^10\./.test(address)) return 1;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return 2;
+  return 3;
 }
 
 function cloudInterpreterStatus() {

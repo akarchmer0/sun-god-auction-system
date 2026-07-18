@@ -77,6 +77,38 @@ button { color: inherit; }
 .marker-tools .icon { width: 12px; }
 
 .camera-panel { grid-area: camera; padding-bottom: 20px; }
+.phone-room-panel { grid-area: camera; padding-bottom: 20px; min-width: 0; }
+.phone-room-status { height: 25px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 4px; padding: 0 7px; color: var(--muted); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .09em; }
+.phone-room-status i { width: 6px; height: 6px; border-radius: 50%; background: #968a78; }
+.phone-room-status.is-live { color: var(--paper); background: #e0d1b2; }
+.phone-room-status.is-live i { background: var(--green); box-shadow: 0 0 0 3px rgba(57,107,73,.13); }
+.phone-join-card { min-height: 126px; margin: 0 18px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #e8dcc3; display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 12px; }
+.phone-qr { width: 104px; height: 104px; display: grid; place-items: center; border: 1px solid var(--line); background: #fff9ed; }
+.phone-qr svg { display: block; width: 100%; height: 100%; }
+.phone-qr > span { width: 42px; height: 42px; display: grid; place-items: center; color: var(--muted); }
+.phone-join-copy { min-width: 0; }
+.phone-join-copy small { color: var(--muted); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .15em; }
+.phone-join-copy > strong { display: block; margin-top: 6px; font: 700 25px/1 "DM Mono", monospace; letter-spacing: .11em; }
+.phone-join-copy p { margin: 8px 0 6px; color: #4f473b; font-size: 9px; line-height: 1.35; }
+.phone-join-copy > span { display: block; overflow: hidden; color: var(--muted); font: 500 7px/1.3 "DM Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.phone-room-actions { margin: 8px 18px 0; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.phone-room-actions button { min-height: 31px; border: 1px solid var(--line); border-radius: 5px; background: #fff9ed; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 8px; font-weight: 800; cursor: pointer; }
+.phone-room-actions button:last-child { padding: 0 9px; background: transparent; }
+.phone-room-actions button:disabled { opacity: .35; cursor: default; }
+.phone-room-actions .icon { width: 12px; height: 12px; }
+.phone-claim-summary { margin: 14px 18px 7px; display: flex; align-items: center; justify-content: space-between; }
+.phone-claim-summary span { color: var(--muted); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .14em; }
+.phone-claim-summary strong { font-size: 8px; }
+.phone-claim-grid { margin: 0 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.phone-claim { min-width: 0; height: 39px; border: 1px solid var(--line); border-radius: 5px; padding: 0 7px; background: #ede2cd; display: flex; align-items: center; gap: 6px; opacity: .58; }
+.phone-claim.is-joined { background: #fff9ed; opacity: 1; box-shadow: inset 0 -2px 0 rgba(57,107,73,.16); }
+.phone-claim > i { width: 5px; height: 22px; border-radius: 3px; flex: 0 0 auto; }
+.phone-claim > span { min-width: 0; flex: 1; }
+.phone-claim strong, .phone-claim small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-claim strong { font-size: 8px; }
+.phone-claim small { margin-top: 3px; color: var(--muted); font: 600 6px/1 "DM Mono", monospace; letter-spacing: .06em; }
+.phone-claim > .icon { width: 11px; height: 11px; color: var(--muted); }
+.phone-claim.is-joined > .icon { color: var(--green); }
 .video-wrap { margin: 0 18px; aspect-ratio: 16/9; max-height: 370px; overflow: hidden; background: #121210; border: 1px solid #2c2c29; border-radius: 8px; position: relative; }
 .video-wrap video { width: 100%; height: 100%; display: none; object-fit: cover; transform: scaleX(-1); filter: saturate(.72) contrast(1.06); }
 .video-wrap.camera-active video { display: block; }
@@ -214,7 +246,7 @@ button { color: inherit; }
 .team-money { text-align: right; }
 .team-money strong { font: 500 12px/1 "DM Mono", monospace; }
 .armed-label { position: absolute; right: 9px; bottom: 4px; color: color-mix(in srgb, var(--team), white 10%); font: 500 6px/1 "DM Mono", monospace; letter-spacing: .08em; }
-.marker-badge { position: absolute; left: 8px; bottom: 4px; color: #65655e; font: 500 7px/1 "DM Mono", monospace; }
+.phone-bid-badge { position: absolute; left: 8px; bottom: 4px; color: #65655e; font: 500 7px/1 "DM Mono", monospace; }
 .keyboard-hint { margin-top: 10px; color: #5f5f58; font-size: 8px; text-align: center; }
 .keyboard-hint kbd { font: inherit; color: #898880; border: 1px solid #383833; border-radius: 3px; padding: 1px 4px; }
 .keyboard-hint span { padding: 0 6px; }
@@ -398,9 +430,9 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .team-bid:disabled { opacity: .52; }
 .team-bid.is-armed:not(.is-high) { border-color: var(--paper); }
 .team-bid.is-high { z-index: 2; border: 2px solid #000; background: #11100d; color: #fff6e5; box-shadow: 5px 5px 0 var(--orange); opacity: 1; transform: translateY(-2px); }
-.team-key, .marker-badge { color: #665d4f; }
+.team-key, .phone-bid-badge { color: #665d4f; }
 .team-copy small, .team-money small { color: #665d4f; }
-.team-bid.is-high .team-key, .team-bid.is-high .marker-badge { color: #c9bba4; }
+.team-bid.is-high .team-key, .team-bid.is-high .phone-bid-badge { color: #c9bba4; }
 .team-bid.is-high .team-copy strong, .team-bid.is-high .team-money strong { color: #fff6e5; }
 .team-bid.is-high .team-copy small, .team-bid.is-high .team-money small { color: #c9bba4; }
 .team-bid.is-high .armed-label { color: #e3b451; font-weight: 700; }
