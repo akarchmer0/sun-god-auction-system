@@ -1,8 +1,4 @@
 import { seedPlayers, makeTeams } from "./data.mjs";
-import { parseSpokenBid } from "./bid-voice.mjs";
-import { hasPotentialBidSignal, normalizeCloudAuctionIntent } from "./auction-intent.mjs";
-import { RealtimeTranscriber } from "./realtime-transcriber.mjs";
-import { VoiceIdentityService } from "./voice-identity.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { createAuctioneerScript } from "./auctioneer-script.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
@@ -25,22 +21,16 @@ import {
 } from "./domain.mjs";
 
 const STORAGE_KEY = "gavel-draft-v1";
-const CLOUD_INTERPRETER_STORAGE_KEY = "gavel-cloud-interpreter-enabled";
 const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
 const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({ players: seedPlayers, teams: makeTeams(), budget: 200, rosterSize: 15 });
-let armedTeamId = state.teams[0]?.id || null;
-let micEnabled = false;
 let voiceEnabled = true;
 let autoEnabled = true;
 let countdownTimer = null;
-let lastTranscript = "Say “bid” or use a team button";
 let notice = null;
-let voiceDialogOpen = false;
-let pendingVoiceBid = null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
 let phoneRoomEvents = null;
@@ -53,19 +43,6 @@ let phoneRoom = {
   claimedTeamIds: [],
   error: null
 };
-let cloudInterpreter = {
-  status: "checking",
-  enabled: localStorage.getItem(CLOUD_INTERPRETER_STORAGE_KEY) !== "false",
-  model: null,
-  message: "Checking whether the cloud bid interpreter is configured."
-};
-let transcriptionService = {
-  status: "checking",
-  listenerStatus: "idle",
-  model: null,
-  message: "Checking whether OpenAI live transcription is configured.",
-  error: null
-};
 let auctioneerService = {
   status: "checking",
   available: null,
@@ -74,17 +51,6 @@ let auctioneerService = {
   voiceId: null,
   message: "Checking Cartesia's realtime auctioneer."
 };
-let voiceState = {
-  status: "ready",
-  error: null,
-  profileTeamIds: [],
-  enrollingTeamId: null,
-  enrollmentProgress: 0,
-  isRecognizing: false,
-  latestScores: {}
-};
-let speechPausedMic = false;
-let speechPausedIdentity = false;
 const auctioneerScript = createAuctioneerScript();
 const auctioneerVoice = new AuctioneerVoice({
   onStatusChange: (snapshot) => {
@@ -95,47 +61,8 @@ const auctioneerVoice = new AuctioneerVoice({
     if (changed) render();
   }
 });
-const voiceIdentity = new VoiceIdentityService({
-  onStateChange: (snapshot) => {
-    const structuralChange = snapshot.status !== voiceState.status
-      || snapshot.enrollingTeamId !== voiceState.enrollingTeamId
-      || snapshot.profileTeamIds.join(",") !== voiceState.profileTeamIds.join(",");
-    voiceState = snapshot;
-    if (structuralChange) render();
-    else refreshVoiceIndicators();
-  },
-  onScores: (scores) => {
-    voiceState.latestScores = scores;
-    refreshVoiceIndicators();
-  }
-});
-const transcriber = new RealtimeTranscriber({
-  onTranscript: async (transcript) => {
-    lastTranscript = `“${transcript}”`;
-    await handleVoiceCommand(transcript);
-  },
-  onInterim: (transcript) => {
-    lastTranscript = `“${transcript}…”`;
-    refreshTranscript();
-  },
-  onStateChange: (snapshot) => {
-    transcriptionService = { ...transcriptionService, listenerStatus: snapshot.status, error: snapshot.error || null };
-    render();
-  },
-  onError: (message) => {
-    if (!micEnabled) return;
-    micEnabled = false;
-    void voiceIdentity.stopRecognition();
-    void transcriber.stop();
-    showNotice({ kind: "error", message });
-  }
-});
-
 render();
 wireGlobalEvents();
-voiceIdentity.loadStoredProfiles().catch((error) => showNotice({ kind: "error", message: error.message }));
-refreshCloudInterpreter();
-refreshTranscriptionService();
 void auctioneerVoice.initialize();
 void initializePhoneRoom();
 
@@ -163,8 +90,6 @@ function render() {
           <span>${available.length} available</span>
         </div>
         <div class="device-controls">
-          <button class="device-button ${micEnabled ? "is-on" : ""}" data-action="microphone" title="Toggle OpenAI bid listening">${icon("mic")} <span>${microphoneLabel()}</span></button>
-          <button class="device-button voice-id-button ${voiceState.isRecognizing ? "is-on" : ""}" data-action="voice-setup" title="Enroll and manage manager voices">${icon("fingerprint")} <span id="voice-id-label">${voiceBadgeLabel()}</span></button>
           <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
@@ -172,7 +97,6 @@ function render() {
       </header>
 
       ${notice ? `<div class="notice ${notice.kind}"><span>${escapeHtml(notice.message)}</span><button data-action="dismiss-notice">×</button></div>` : ""}
-      ${pendingVoiceBid ? voiceConfirmation() : ""}
       ${pendingVisualTie ? visualTieConfirmation() : ""}
 
       <main class="draft-grid">
@@ -200,10 +124,6 @@ function render() {
               const joined = phoneRoom.claimedTeamIds.includes(team.id);
               return `<div class="phone-claim ${joined ? "is-joined" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${joined ? "PHONE READY" : "WAITING"}</small></span>${icon(joined ? "check" : "phone")}</div>`;
             }).join("")}
-          </div>
-          <div class="listener-card ${micEnabled ? "is-listening" : ""}">
-            <div class="waveform">${Array.from({ length: 13 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>
-            <div><small>${micEnabled ? "OPENAI HEARD IN THE ROOM" : "VOICE INPUT"}</small><p id="live-transcript">${escapeHtml(lastTranscript)}</p></div>
           </div>
           <p class="camera-note">Each manager scans once, chooses their team, then uses the next-dollar button, an easy jump, or a custom whole-dollar bid. The laptop remains authoritative for budgets, rosters, and simultaneous bids.</p>
         </section>
@@ -254,14 +174,7 @@ function render() {
       </main>
     </div>
     <dialog id="setup-dialog">${setupDialog()}</dialog>
-    <dialog id="voice-dialog" class="voice-dialog">${voiceSetupDialog()}</dialog>
   `;
-
-  if (voiceDialogOpen) {
-    const dialog = document.querySelector("#voice-dialog");
-    if (dialog && !dialog.open) dialog.showModal();
-  }
-  refreshVoiceIndicators();
 }
 
 function playerCard(player, highBidder) {
@@ -314,20 +227,16 @@ function queueRow(player, index) {
 
 function teamBidButton(team, index) {
   const isHigh = team.id === state.auction.highBidderId;
-  const isArmed = team.id === armedTeamId;
-  const isEnrolled = voiceState.profileTeamIds.includes(team.id);
-  const voiceScore = voiceState.latestScores[team.id] || 0;
   const maxBid = maxBidForTeam(state, team.id);
   const phoneJoined = phoneRoom.claimedTeamIds.includes(team.id);
   const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || maxBid < Math.max(1, state.auction.amount + state.config.increment);
-  return `<button class="team-bid ${isHigh ? "is-high" : ""} ${isArmed ? "is-armed" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" ${disabled ? "disabled" : ""}>
+  return `<button class="team-bid ${isHigh ? "is-high" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" ${disabled ? "disabled" : ""}>
     <span class="team-key" title="Keyboard shortcut ${index < 9 ? index + 1 : "unassigned"}">${index < 9 ? index + 1 : ""}</span>
     <span class="team-swatch"></span>
     <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
     <span class="team-money"><strong>$${team.budget}</strong><small>max $${maxBid}</small></span>
-    <span class="armed-label">${isHigh ? "HIGH BID" : isArmed ? "VOICE ARMED" : "+ BID"}</span>
+    <span class="armed-label">${isHigh ? "HIGH BID" : "+ BID"}</span>
     <span class="phone-bid-badge" title="${phoneJoined ? "Phone connected" : "Waiting for phone"}">${phoneJoined ? "PHONE READY" : "NO PHONE"}</span>
-    <span class="voice-profile-dot ${isEnrolled ? "is-enrolled" : ""}" data-voice-dot="${team.id}" style="--voice-score:${Math.round(voiceScore * 100)}%" title="${isEnrolled ? `Voice enrolled · ${Math.round(voiceScore * 100)}% last match` : "Voice not enrolled"}">${icon("fingerprint")}</span>
   </button>`;
 }
 
@@ -350,108 +259,6 @@ function setupDialog() {
     </div>
     <div class="dialog-actions"><button type="button" data-action="close-setup" class="secondary-action">Cancel</button><button type="submit" class="primary-action">Create draft room</button></div>
   </form>`;
-}
-
-function voiceSetupDialog() {
-  const connected = voiceIdentity.isSupported && voiceState.status !== "unsupported";
-  const enrolledCount = state.teams.filter((team) => voiceState.profileTeamIds.includes(team.id)).length;
-  return `<div class="voice-setup">
-    <div class="dialog-head"><div><span class="eyebrow">PRIVATE VOICE CHECK-IN</span><h2>Recognize every manager</h2></div><button type="button" data-action="close-voice-setup" class="dialog-close" aria-label="Close">×</button></div>
-    <p class="voice-intro">Each manager speaks for six seconds to create a local voiceprint. Raw enrollment audio is discarded after local processing. When the main microphone is on, detected speech is transcribed by OpenAI; voiceprints stay on this Mac. The bid interpreter receives only the final text plus auction context. Always get everyone’s consent before enrolling.</p>
-    ${auctioneerVoiceCard()}
-    ${transcriptionCard()}
-    ${cloudInterpreterCard()}
-    ${!voiceIdentity.isSupported ? `<div class="voice-error">Speaker recognition is unavailable in this browser. Use a current version of Chrome, Safari, Firefox, or Edge.</div>` : ""}
-    ${connected ? `<div class="voice-ready-banner"><span>${icon("shield")} LOCAL SPEAKER ENGINE READY</span><b>${enrolledCount}/${state.teams.length} managers enrolled</b></div>` : ""}
-    ${voiceState.error ? `<div class="voice-error">${escapeHtml(voiceState.error)}</div>` : ""}
-    <div class="enrollment-list ${connected ? "" : "is-locked"}">
-      ${state.teams.map((team) => voiceEnrollmentRow(team, connected)).join("")}
-    </div>
-    <div class="voice-footer">
-    <span>Voiceprints are biometric identifiers stored only in this browser’s IndexedDB on this Mac.</span>
-      ${enrolledCount ? `<button type="button" class="text-button danger" data-action="delete-all-voices">Delete all voiceprints</button>` : ""}
-    </div>
-  </div>`;
-}
-
-function auctioneerVoiceCard() {
-  const ready = auctioneerService.status === "ready" && auctioneerService.available;
-  const summary = ready
-    ? `Cartesia ${auctioneerService.model} is streaming expressive, interruptible speech. Phone bids immediately preempt the current announcement.`
-    : auctioneerService.message;
-  return `<div class="cloud-interpreter-card ${ready ? "is-active" : ""}">
-    <div><span class="eyebrow">AI AUCTIONEER VOICE</span><strong>${ready ? "CARTESIA READY" : auctioneerService.status === "checking" ? "CHECKING" : "BROWSER FALLBACK"}</strong><p>${escapeHtml(summary)}</p></div>
-  </div>`;
-}
-
-function transcriptionCard() {
-  const ready = transcriptionService.status === "ready";
-  const listening = transcriptionService.listenerStatus === "listening";
-  const summary = transcriptionService.error
-    || (!ready ? transcriptionService.message : listening
-      ? `OpenAI ${transcriptionService.model} is transcribing live microphone audio.`
-      : `OpenAI ${transcriptionService.model} will transcribe the room when the mic is on.`);
-  return `<div class="cloud-interpreter-card ${listening ? "is-active" : ""}">
-    <div><span class="eyebrow">OPENAI LIVE TRANSCRIPTION</span><strong>${listening ? "LISTENING" : ready ? "READY" : "NOT CONFIGURED"}</strong><p>${escapeHtml(summary)}</p></div>
-  </div>`;
-}
-
-function cloudInterpreterCard() {
-  const ready = cloudInterpreter.status === "ready";
-  const active = ready && cloudInterpreter.enabled;
-  const summary = !ready
-    ? cloudInterpreter.message
-    : active
-      ? `OpenAI ${cloudInterpreter.model} is correcting likely transcription mistakes before a bid is applied.`
-      : "Cloud interpretation is off. Sun God will use its on-device phrase parser instead.";
-  return `<div class="cloud-interpreter-card ${active ? "is-active" : ""}">
-    <div><span class="eyebrow">CLOUD BID INTERPRETER</span><strong>${active ? "ON · READY" : ready ? "OFF" : "NOT CONFIGURED"}</strong><p>${escapeHtml(summary)}</p></div>
-    <button type="button" class="secondary-action compact" data-action="toggle-cloud-interpreter" ${ready ? "" : "disabled"}>${active ? "Turn off" : "Turn on"}</button>
-  </div>`;
-}
-
-function voiceEnrollmentRow(team, connected) {
-  const enrolled = voiceState.profileTeamIds.includes(team.id);
-  const active = voiceState.enrollingTeamId === team.id;
-  const score = voiceState.latestScores[team.id] || 0;
-  return `<div class="enrollment-row ${active ? "is-active" : ""}">
-    <span class="team-swatch" style="background:${team.color}"></span>
-    <span class="enrollment-person"><strong>${escapeHtml(team.manager)}</strong><small>${escapeHtml(team.name)}</small></span>
-    <span class="enrollment-status ${enrolled ? "is-enrolled" : ""}">${enrolled ? `${icon("check")} Enrolled` : "Not enrolled"}</span>
-    ${active ? `<div class="enrollment-progress"><i data-enrollment-bar style="width:${voiceState.enrollmentProgress}%"></i></div><b class="progress-number" data-enrollment-progress>${voiceState.enrollmentProgress}%</b>` : `<span class="live-score" data-voice-score="${team.id}">${voiceState.isRecognizing && enrolled ? `${Math.round(score * 100)}% match` : ""}</span>`}
-    <div class="enrollment-actions">
-      ${active ? `<button type="button" class="secondary-action compact" data-action="cancel-enrollment">Cancel</button>` : `<button type="button" class="secondary-action compact" data-action="enroll-voice" data-team-id="${team.id}" ${connected ? "" : "disabled"}>${enrolled ? "Re-enroll" : "Enroll voice"}</button>`}
-      ${enrolled && !active ? `<button type="button" class="icon-button compact" data-action="delete-voice" data-team-id="${team.id}" title="Delete ${escapeHtml(team.manager)}'s voiceprint">×</button>` : ""}
-    </div>
-    ${active ? `<p class="enrollment-prompt">Keep speaking naturally in a quiet room until the meter reaches 100%. Try: “My name is ${escapeHtml(team.manager)}, and when I want a player I will say bid during this auction.”</p>` : ""}
-  </div>`;
-}
-
-function voiceConfirmation() {
-  if (pendingVoiceBid.resolving) {
-    const copy = pendingVoiceBid.stage === "interpreting"
-      ? "Interpreting the likely bid, then matching the speaker…"
-      : "Matching the speaker against local voiceprints…";
-    return `<div class="voice-confirmation is-resolving">
-      <div>${icon("fingerprint")}<span><small>VOICE BID HEARD · AUCTION PAUSED</small><strong>${escapeHtml(pendingVoiceBid.transcript)}</strong></span></div>
-      <p>${copy}</p>
-    </div>`;
-  }
-  const candidates = pendingVoiceBid.candidates.length
-    ? pendingVoiceBid.candidates
-    : state.teams.map((team) => ({ teamId: team.id, confidence: 0 }));
-  return `<div class="voice-confirmation">
-    <div>${icon("alert")}<span><small>VOICE NEEDS CONFIRMATION</small><strong>${escapeHtml(pendingVoiceBid.transcript)}</strong></span></div>
-    <p>Who made that bid?</p>
-    <div class="voice-candidates">
-      ${candidates.slice(0, 4).map((candidate) => {
-        const team = state.teams.find((item) => item.id === candidate.teamId);
-        if (!team) return "";
-        return `<button data-action="confirm-voice-bid" data-team-id="${team.id}"><i style="background:${team.color}"></i>${escapeHtml(team.manager)}${candidate.confidence ? `<small>${Math.round(candidate.confidence * 100)}%</small>` : ""}</button>`;
-      }).join("")}
-      <button class="reject" data-action="reject-voice-bid">Not a bid</button>
-    </div>
-  </div>`;
 }
 
 function visualTieConfirmation() {
@@ -477,29 +284,19 @@ function wireGlobalEvents() {
     try {
       if (action === "setup") return document.querySelector("#setup-dialog")?.showModal();
       if (action === "close-setup") return document.querySelector("#setup-dialog")?.close();
-      if (action === "voice-setup") { voiceDialogOpen = true; render(); return; }
-      if (action === "close-voice-setup") { voiceDialogOpen = false; render(); return; }
-      if (action === "enroll-voice") return beginVoiceEnrollment(button.dataset.teamId);
-      if (action === "cancel-enrollment") return voiceIdentity.cancelEnrollment();
-      if (action === "delete-voice") return voiceIdentity.deleteProfile(button.dataset.teamId);
-      if (action === "delete-all-voices") return voiceIdentity.deleteAllProfiles();
-      if (action === "toggle-cloud-interpreter") return toggleCloudInterpreter();
-      if (action === "confirm-voice-bid") return confirmPendingVoiceBid(button.dataset.teamId);
-      if (action === "reject-voice-bid") { pendingVoiceBid = null; render(); scheduleCountdown(); return; }
       if (action === "resolve-visual-tie") return resolveVisualTie(button.dataset.teamId);
       if (action === "cancel-visual-tie") return cancelVisualTie();
       if (action === "dismiss-notice") return showNotice(null);
-      if (action === "microphone") return toggleMicrophone();
       if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (action === "copy-phone-link") return copyPhoneJoinLink();
       if (action === "reset-phone-claims") return resetPhoneClaims();
-      if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) stopAuctioneer({ resumeListening: true }); render(); return; }
+      if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) stopAuctioneer(); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
       if (action === "open") return beginAuction();
-      if (action === "pause") { clearTimer(); stopAuctioneer({ resumeListening: true }); return update(pauseAuction(state)); }
+      if (action === "pause") { clearTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
       if (action === "advance") return runCountdownStep(true);
       if (action === "next") return update(moveToNextPlayer(state));
-      if (action === "bid") { armedTeamId = button.dataset.teamId; return submitBid(button.dataset.teamId); }
+      if (action === "bid") return submitBid(button.dataset.teamId);
       if (action === "undo") { clearTimer(); return update(undoLastSale(state), "Last sale reversed."); }
       if (action === "import") return document.querySelector("#csv-input")?.click();
     } catch (error) {
@@ -537,7 +334,6 @@ function wireGlobalEvents() {
     state = createDraft({ players: seedPlayers, teams, budget, rosterSize, increment });
     clearVisualBidWindow();
     pendingVisualTie = null;
-    armedTeamId = state.teams[0].id;
     persistDraft();
     document.querySelector("#setup-dialog")?.close();
     render();
@@ -548,8 +344,7 @@ function wireGlobalEvents() {
     if (event.target.matches("input, textarea")) return;
     const teamIndex = Number(event.key) - 1;
     if (teamIndex >= 0 && teamIndex < Math.min(9, state.teams.length)) {
-      armedTeamId = state.teams[teamIndex].id;
-      submitBid(armedTeamId);
+      submitBid(state.teams[teamIndex].id);
     }
     if (event.code === "Space" && ["open", "once", "twice"].includes(state.auction.phase)) {
       event.preventDefault();
@@ -569,9 +364,9 @@ function beginAuction() {
   speak(auctioneerScript.nomination(player), scheduleCountdown, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
 }
 
-function submitBid(teamId, voiceAmount = null, { source = "manual" } = {}) {
+function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   const input = document.querySelector("#manual-amount");
-  const amount = voiceAmount ?? (input ? Number(input.value) : null);
+  const amount = bidAmount ?? (input ? Number(input.value) : null);
   clearTimer();
   clearVisualBidWindow();
   pendingVisualTie = null;
@@ -587,7 +382,7 @@ function submitBid(teamId, voiceAmount = null, { source = "manual" } = {}) {
 }
 
 function runCountdownStep(force = false) {
-  if (!force && (pendingVoiceBid || pendingVisualTie || visualBidWindow)) return;
+  if (!force && (pendingVisualTie || visualBidWindow)) return;
   clearTimer();
   const before = state.auction.phase;
   state = advanceCountdown(state);
@@ -606,7 +401,7 @@ function runCountdownStep(force = false) {
 
 function scheduleCountdown() {
   clearTimer();
-  if (!autoEnabled || pendingVoiceBid || pendingVisualTie || visualBidWindow || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  if (!autoEnabled || pendingVisualTie || visualBidWindow || !["open", "once", "twice"].includes(state.auction.phase)) return;
   const delay = COUNTDOWN_DELAYS[state.auction.phase];
   countdownTimer = window.setTimeout(runCountdownStep, delay);
 }
@@ -618,273 +413,19 @@ function clearTimer() {
 
 function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
   if (!voiceEnabled) { onDone?.(); return; }
-  if (micEnabled) speechPausedMic = true;
-  if (voiceState.isRecognizing) speechPausedIdentity = true;
-  if (speechPausedMic) void transcriber.stop();
-  if (speechPausedIdentity) void voiceIdentity.stopRecognition();
   auctioneerVoice.speak(text, {
     style,
     priority,
-    onDone: () => {
-      resumeListeningAfterSpeech();
-      onDone?.();
-    }
+    onDone
   });
 }
 
-function stopAuctioneer({ resumeListening = false } = {}) {
+function stopAuctioneer() {
   auctioneerVoice.cancel();
-  if (resumeListening) resumeListeningAfterSpeech();
-}
-
-function resumeListeningAfterSpeech() {
-  const resumeMic = speechPausedMic;
-  const resumeIdentity = speechPausedIdentity;
-  speechPausedMic = false;
-  speechPausedIdentity = false;
-  if (resumeMic && micEnabled) startLiveTranscription().catch((error) => handleTranscriptionFailure(error));
-  if (resumeIdentity && micEnabled) voiceIdentity.startRecognition().catch(() => {});
-}
-
-async function toggleMicrophone() {
-  if (!transcriber.isSupported) return showNotice({ kind: "error", message: "OpenAI live transcription needs a current browser with microphone and WebSocket support." });
-  if (transcriptionService.status === "unavailable") return showNotice({ kind: "error", message: transcriptionService.message });
-  if (micEnabled) {
-    micEnabled = false;
-    await transcriber.stop();
-    await voiceIdentity.stopRecognition();
-    render();
-    return;
-  }
-  micEnabled = true;
-  if (auctioneerVoice.isSpeaking) {
-    speechPausedMic = true;
-    speechPausedIdentity = true;
-    render();
-    return;
-  }
-  try {
-    await startLiveTranscription();
-    voiceIdentity.startRecognition().catch((error) => showNotice({ kind: "error", message: `Voice identity could not start: ${error.message}` }));
-  } catch (error) {
-    handleTranscriptionFailure(error);
-  }
-  render();
-}
-
-async function startLiveTranscription() {
-  if (!micEnabled) return;
-  await transcriber.start();
-}
-
-function handleTranscriptionFailure(error) {
-  micEnabled = false;
-  void transcriber.stop();
-  void voiceIdentity.stopRecognition();
-  showNotice({ kind: "error", message: `OpenAI transcription could not start: ${error.message}` });
-}
-
-async function handleVoiceCommand(transcript) {
-  if (pendingVoiceBid) return;
-  let command = parseSpokenBid(transcript);
-  let namedTeam = findNamedTeam(command.normalized);
-  if (!hasPotentialBidSignal(command, namedTeam)) {
-    render();
-    return;
-  }
-
-  const canIdentifySpeaker = voiceState.isRecognizing && voiceState.profileTeamIds.length;
-  let identityPromise = null;
-  let resolvingBid = null;
-
-  if (cloudInterpreter.enabled && cloudInterpreter.status === "ready") {
-    clearTimer();
-    resolvingBid = {
-      transcript: `“${transcript}”`,
-      amount: command.amount,
-      candidates: [],
-      resolving: true,
-      stage: "interpreting"
-    };
-    pendingVoiceBid = resolvingBid;
-    render();
-    if (canIdentifySpeaker) identityPromise = voiceIdentity.identifyRecent();
-
-    try {
-      const interpretation = await interpretCloudAuctionIntent(transcript);
-      if (pendingVoiceBid !== resolvingBid) return;
-      if (interpretation.intent === "ignore") {
-        pendingVoiceBid = null;
-        render();
-        scheduleCountdown();
-        return;
-      }
-      command = {
-        ...command,
-        isBid: true,
-        amount: interpretation.amount ?? command.amount
-      };
-      namedTeam = state.teams.find((team) => team.id === interpretation.managerId) || namedTeam;
-      resolvingBid.amount = command.amount;
-    } catch {
-      // Local parsing remains the safe fallback if the cloud call is unavailable or slow.
-    }
-  }
-
-  const requested = command.amount;
-  if (!command.isBid && !(namedTeam && requested !== null)) {
-    if (pendingVoiceBid === resolvingBid) {
-      pendingVoiceBid = null;
-      render();
-      scheduleCountdown();
-    }
-    return;
-  }
-
-  if (canIdentifySpeaker) {
-    clearTimer();
-    resolvingBid ||= {
-      transcript: `“${transcript}”`,
-      amount: requested,
-      candidates: [],
-      resolving: true,
-      stage: "identifying"
-    };
-    resolvingBid.amount = requested;
-    resolvingBid.stage = "identifying";
-    pendingVoiceBid = resolvingBid;
-    render();
-    const identity = await (identityPromise || voiceIdentity.identifyRecent());
-    if (pendingVoiceBid !== resolvingBid) return;
-    const matchedTeamExists = state.teams.some((team) => team.id === identity.teamId);
-    if (identity.status === "matched" && matchedTeamExists) {
-      pendingVoiceBid = null;
-      try { submitBid(identity.teamId, requested); }
-      catch (error) { showNotice({ kind: "error", message: error.message }); }
-      return;
-    }
-    pendingVoiceBid = {
-      transcript: `“${transcript}”`,
-      amount: requested,
-      candidates: identity.candidates.filter((candidate) => state.teams.some((team) => team.id === candidate.teamId)),
-      resolving: false
-    };
-    render();
-    return;
-  }
-
-  if (pendingVoiceBid === resolvingBid) pendingVoiceBid = null;
-  const teamId = namedTeam?.id || armedTeamId;
-  if (!teamId) return showNotice({ kind: "error", message: "I heard a bid but could not identify a team. Arm a team first." });
-  clearTimer();
-  try { submitBid(teamId, requested); }
-  catch (error) { showNotice({ kind: "error", message: error.message }); }
-}
-
-function findNamedTeam(normalized) {
-  return state.teams.find((team) => {
-    const words = `${team.name} ${team.manager}`.toLowerCase().split(/\s+/).filter((word) => word.length > 2);
-    return words.some((word) => normalized.includes(word));
-  });
-}
-
-async function refreshCloudInterpreter() {
-  try {
-    const response = await fetch("/api/auction/interpret/status", { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    cloudInterpreter = {
-      ...cloudInterpreter,
-      status: response.ok && payload.available ? "ready" : "unavailable",
-      model: payload.model || null,
-      message: payload.message || "Cloud bid interpretation is unavailable."
-    };
-  } catch {
-    cloudInterpreter = {
-      ...cloudInterpreter,
-      status: "unavailable",
-      model: null,
-      message: "Cloud bid interpretation needs Sun God's local server."
-    };
-  }
-  if (voiceDialogOpen) render();
-}
-
-async function refreshTranscriptionService() {
-  try {
-    const response = await fetch("/api/transcription/status", { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    transcriptionService = {
-      ...transcriptionService,
-      status: response.ok && payload.available ? "ready" : "unavailable",
-      model: payload.model || null,
-      message: payload.message || "OpenAI live transcription is unavailable.",
-      error: null
-    };
-  } catch {
-    transcriptionService = {
-      ...transcriptionService,
-      status: "unavailable",
-      model: null,
-      message: "OpenAI live transcription needs Sun God's local server.",
-      error: null
-    };
-  }
-  render();
-}
-
-function toggleCloudInterpreter() {
-  if (cloudInterpreter.status !== "ready") return;
-  cloudInterpreter.enabled = !cloudInterpreter.enabled;
-  localStorage.setItem(CLOUD_INTERPRETER_STORAGE_KEY, String(cloudInterpreter.enabled));
-  render();
-}
-
-async function interpretCloudAuctionIntent(transcript) {
-  const response = await fetch("/api/auction/interpret", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      transcript,
-      auction: {
-        currentBid: state.auction.amount,
-        increment: state.config.increment,
-        phase: state.auction.phase
-      },
-      teams: state.teams.map((team) => ({ id: team.id, name: team.name, manager: team.manager }))
-    })
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Cloud bid interpretation is unavailable.");
-  return normalizeCloudAuctionIntent(payload, state.teams.map((team) => team.id));
-}
-
-async function beginVoiceEnrollment(teamId) {
-  stopAuctioneer();
-  speechPausedMic = false;
-  speechPausedIdentity = false;
-  clearTimer();
-  if (micEnabled) {
-    micEnabled = false;
-    await transcriber.stop();
-  }
-  try {
-    await voiceIdentity.beginEnrollment(teamId);
-  } catch (error) {
-    showNotice({ kind: "error", message: error.message });
-  }
-}
-
-function confirmPendingVoiceBid(teamId) {
-  if (!pendingVoiceBid) return;
-  const { amount } = pendingVoiceBid;
-  pendingVoiceBid = null;
-  render();
-  try { submitBid(teamId, amount); }
-  catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
 }
 
 function handlePhoneBid(bid) {
-  if (!bid?.teamId || pendingVoiceBid || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  if (!bid?.teamId || !["open", "once", "twice"].includes(state.auction.phase)) return;
   if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
   collectExternalBids([{ teamId: bid.teamId, amount: bid.amount }], "phone", bid.receivedAt);
 }
@@ -1049,7 +590,7 @@ async function syncPhoneRoomState() {
         amount: state.auction.amount,
         nextBid: nextVisualBidAmount(state),
         highBidderId: state.auction.highBidderId,
-        acceptingBids: ["open", "once", "twice"].includes(state.auction.phase) && !pendingVoiceBid && !pendingVisualTie,
+        acceptingBids: ["open", "once", "twice"].includes(state.auction.phase) && !pendingVisualTie,
         player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam, suggestedValue: player.suggestedValue } : null
       },
       teams: state.teams.map((team) => ({
@@ -1177,47 +718,10 @@ function qrCodeSvg(text) {
   return `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="QR code for room ${escapeHtml(phoneRoom.roomId)}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff9ed"/><path d="${path}" fill="#17130e"/></svg>`;
 }
 
-function voiceBadgeLabel() {
-  const enrolled = state.teams.filter((team) => voiceState.profileTeamIds.includes(team.id)).length;
-  if (voiceState.status === "enrolling") return `Enrolling ${enrolled}/${state.teams.length}`;
-  if (voiceState.isRecognizing) return `Identifying ${enrolled}/${state.teams.length}`;
-  return enrolled ? `Voices ${enrolled}/${state.teams.length}` : "Enroll voices";
-}
-
-function microphoneLabel() {
-  if (transcriptionService.listenerStatus === "connecting") return "Connecting";
-  if (micEnabled && transcriptionService.listenerStatus === "listening") return "Listening";
-  return micEnabled ? "Starting" : "Mic off";
-}
-
 function auctioneerVoiceTitle() {
   if (!voiceEnabled) return "Turn on auctioneer voice";
   if (auctioneerService.status === "ready" && auctioneerService.available) return `Cartesia ${auctioneerService.model} auctioneer is on`;
   return "Auctioneer voice is on with browser fallback";
-}
-
-function refreshTranscript() {
-  const transcript = document.querySelector("#live-transcript");
-  if (transcript) transcript.textContent = lastTranscript;
-}
-
-function refreshVoiceIndicators() {
-  const label = document.querySelector("#voice-id-label");
-  if (label) label.textContent = voiceBadgeLabel();
-  const progress = document.querySelector("[data-enrollment-progress]");
-  const bar = document.querySelector("[data-enrollment-bar]");
-  if (progress) progress.textContent = `${voiceState.enrollmentProgress}%`;
-  if (bar) bar.style.width = `${voiceState.enrollmentProgress}%`;
-  for (const team of state.teams) {
-    const score = voiceState.latestScores[team.id] || 0;
-    const scoreLabel = document.querySelector(`[data-voice-score="${team.id}"]`);
-    if (scoreLabel) scoreLabel.textContent = voiceState.isRecognizing && voiceState.profileTeamIds.includes(team.id) ? `${Math.round(score * 100)}% last match` : "";
-    const dot = document.querySelector(`[data-voice-dot="${team.id}"]`);
-    if (dot) {
-      dot.style.setProperty("--voice-score", `${Math.round(score * 100)}%`);
-      dot.title = voiceState.profileTeamIds.includes(team.id) ? `Voice enrolled · ${Math.round(score * 100)}% last match` : "Voice not enrolled";
-    }
-  }
 }
 
 function restoreDraft() {
@@ -1248,7 +752,6 @@ function escapeHtml(value = "") {
 
 function icon(name) {
   const paths = {
-    mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>',
     phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 5h4M11 18h2"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     camera: '<path d="M14.5 5 13 3H7L5.5 5H3a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-6.5Z"/><circle cx="10" cy="12" r="4"/>',
@@ -1258,8 +761,6 @@ function icon(name) {
     upload: '<path d="M12 16V3m0 0L7 8m5-5 5 5M4 14v6h16v-6"/>',
     arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
-    fingerprint: '<path d="M12 10a2 2 0 0 0-2 2c0 1.7-.3 4.2-1.8 6M15.5 13.5c-.2 2.7-1 5.2-2.4 7.2M6.5 16.5c.7-1.7.8-3.2.8-4.5a4.7 4.7 0 0 1 9.4 0c0 .9-.1 1.8-.2 2.7M4.2 12a7.8 7.8 0 0 1 15.6 0c0 3.5-.7 6.7-2 9M7.3 5.3A9.8 9.8 0 0 1 21.8 14M2.2 14A9.8 9.8 0 0 1 4 6.8"/>',
-    shield: '<path d="M12 22s8-3.8 8-10V5l-8-3-8 3v7c0 6.2 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     alert: '<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5m0 3h.01"/>',
     print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/>',

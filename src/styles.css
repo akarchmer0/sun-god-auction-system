@@ -142,13 +142,6 @@ button { color: inherit; }
 .marker-chip { height: 24px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid color-mix(in srgb, var(--marker), #333 60%); border-radius: 5px; padding: 0 7px; background: #1d1d1a; color: #bdbbb3; font: 500 8px/1 "DM Mono", monospace; }
 .marker-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--marker); }
 .marker-chip.is-unknown { --marker: #8a6458; color: #a98275; }
-.listener-card { margin: 13px 18px 0; border: 1px solid #30302c; background: #1c1c19; padding: 13px; border-radius: 7px; display: flex; align-items: center; gap: 12px; }
-.listener-card.is-listening { border-color: rgba(240,93,35,.3); background: rgba(240,93,35,.035); }
-.listener-card small { color: #76766e; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .1em; }
-.listener-card p { margin: 5px 0 0; color: #bbb9b1; font-size: 11px; line-height: 1.35; }
-.waveform { width: 38px; height: 28px; display: flex; align-items: center; justify-content: center; gap: 1.5px; }
-.waveform i { display: block; width: 2px; height: 5px; background: #5a5953; border-radius: 2px; }
-.is-listening .waveform i { background: var(--orange); animation: wave .75s ease-in-out infinite alternate; animation-delay: calc(var(--i) * -50ms); }
 .camera-note { color: #66665f; font-size: 9px; line-height: 1.55; margin: 11px 20px 0; }
 
 .auction-stage { grid-area: stage; background: #151513; position: relative; overflow: hidden; min-height: 570px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center; }
@@ -234,10 +227,6 @@ button { color: inherit; }
 .team-bid:not(:disabled):hover { border-color: color-mix(in srgb, var(--team), #30302c 45%); background: #22221f; transform: translateY(-1px); }
 .team-bid:disabled { cursor: default; opacity: .58; }
 .team-bid.is-high { border-color: color-mix(in srgb, var(--team), #30302c 40%); box-shadow: inset 3px 0 0 var(--team); opacity: 1; }
-.team-bid.is-armed:not(.is-high) { border-style: dashed; border-color: color-mix(in srgb, var(--team), #30302c 55%); opacity: 1; }
-.voice-profile-dot { position: absolute; top: 5px; right: 6px; width: 14px; height: 14px; display: grid; place-items: center; color: #4e4e48; opacity: .75; }
-.voice-profile-dot .icon { width: 11px; height: 11px; }
-.voice-profile-dot.is-enrolled { color: color-mix(in srgb, var(--team), white 18%); opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--team), transparent 40%)); }
 .team-key { color: #5e5e57; font: 500 8px/1 "DM Mono", monospace; }
 .team-swatch { width: 7px; height: 28px; border-radius: 5px; background: var(--team); opacity: .8; }
 .team-copy, .team-money { min-width: 0; }
@@ -274,56 +263,6 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .form-grid textarea { width: 100%; margin-top: 7px; border: 1px solid #383833; border-radius: 6px; padding: 10px; resize: vertical; background: #151513; color: var(--paper); outline: 0; font: 500 11px/1.6 "DM Mono", monospace; }
 .form-grid textarea:focus { border-color: var(--orange); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
-
-.voice-dialog { width: min(720px, 92vw); max-height: 88vh; overflow: auto; }
-.voice-setup { padding: 24px; }
-.voice-intro { max-width: 600px; margin: 12px 0 18px; color: #93928a; font-size: 11px; line-height: 1.6; }
-.voice-ready-banner { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #31523a; border-radius: 7px; background: #17221a; color: #8fc49a; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
-.voice-ready-banner span { display: flex; align-items: center; gap: 7px; }
-.voice-ready-banner .icon { width: 14px; }
-.voice-ready-banner b { color: #b4cdb9; font-weight: 500; }
-.cloud-interpreter-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 13px; padding: 12px; border: 1px solid #3b3933; border-radius: 7px; background: #191916; }
-.cloud-interpreter-card.is-active { border-color: #405868; background: #172027; }
-.cloud-interpreter-card strong { display: block; margin-top: 5px; color: #9b9a91; font: 500 9px/1 "DM Mono", monospace; letter-spacing: .08em; }
-.cloud-interpreter-card.is-active strong { color: #93bed1; }
-.cloud-interpreter-card p { max-width: 470px; margin: 7px 0 0; color: #7e7d75; font-size: 9px; line-height: 1.5; }
-.cloud-interpreter-card .compact:disabled { opacity: .42; cursor: default; }
-.voice-error { margin: 10px 0; padding: 10px 12px; border: 1px solid #743a2d; border-radius: 6px; background: #321d18; color: #efad98; font-size: 10px; line-height: 1.5; }
-.enrollment-list { margin-top: 14px; border: 1px solid #34342f; border-radius: 8px; overflow: hidden; }
-.enrollment-list.is-locked { opacity: .45; }
-.enrollment-row { min-height: 64px; display: grid; grid-template-columns: 8px minmax(125px, 1fr) 90px minmax(80px, 1fr) auto; align-items: center; gap: 11px; padding: 10px 12px; border-bottom: 1px solid #30302c; background: #1a1a18; position: relative; }
-.enrollment-row:last-child { border-bottom: 0; }
-.enrollment-row.is-active { grid-template-rows: auto auto; background: #20201c; }
-.enrollment-row .team-swatch { height: 30px; }
-.enrollment-person strong, .enrollment-person small { display: block; }
-.enrollment-person strong { font-size: 11px; }
-.enrollment-person small { margin-top: 3px; color: #6f6e67; font-size: 8px; }
-.enrollment-status { color: #686861; font: 500 8px/1 "DM Mono", monospace; text-transform: uppercase; }
-.enrollment-status.is-enrolled { color: #81b98b; display: flex; align-items: center; gap: 4px; }
-.enrollment-status .icon { width: 12px; }
-.enrollment-progress { height: 7px; overflow: hidden; background: #33332e; border-radius: 7px; }
-.enrollment-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--orange), #ff986f); transition: width .15s ease; }
-.progress-number, .live-score { color: #8b8a82; font: 500 8px/1 "DM Mono", monospace; }
-.enrollment-actions { display: flex; justify-content: flex-end; gap: 6px; }
-.secondary-action.compact { min-height: 30px; padding: 0 10px; font-size: 9px; }
-.icon-button.compact { width: 30px; height: 30px; color: #9c6658; }
-.enrollment-prompt { grid-column: 2 / -1; margin: 0; color: #9b887f; font-size: 9px; line-height: 1.45; }
-.voice-footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 12px; color: #66665f; font-size: 8px; line-height: 1.5; }
-.text-button.danger { color: #a2695b; }
-
-.voice-confirmation { position: fixed; z-index: 45; top: 83px; left: 50%; width: min(760px, calc(100vw - 40px)); transform: translateX(-50%); display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; padding: 13px 15px; border: 1px solid #7a4935; border-radius: 9px; background: #281c17; box-shadow: 0 18px 55px rgba(0,0,0,.55); }
-.voice-confirmation > div:first-child { display: flex; align-items: center; gap: 10px; }
-.voice-confirmation > div:first-child .icon { color: var(--orange-soft); }
-.voice-confirmation span small, .voice-confirmation span strong { display: block; }
-.voice-confirmation span small { color: var(--orange-soft); font: 500 7px/1 "DM Mono", monospace; letter-spacing: .1em; }
-.voice-confirmation span strong { margin-top: 5px; font-size: 11px; }
-.voice-confirmation > p { margin: 0; color: #b9a79e; font-size: 10px; }
-.voice-candidates { display: flex; gap: 6px; }
-.voice-candidates button { height: 32px; display: flex; align-items: center; gap: 6px; border: 1px solid #554138; border-radius: 5px; padding: 0 9px; background: #34251f; color: #d2c8c2; font-size: 9px; cursor: pointer; }
-.voice-candidates button:hover { border-color: var(--orange); }
-.voice-candidates button i { width: 6px; height: 18px; border-radius: 3px; }
-.voice-candidates button small { color: #8e7e76; }
-.voice-candidates button.reject { color: #988a83; background: transparent; }
 
 .visual-tie-confirmation { position: fixed; z-index: 44; top: 83px; left: 50%; width: min(880px, calc(100vw - 40px)); transform: translateX(-50%); display: grid; grid-template-columns: auto minmax(160px, 1fr) auto; align-items: center; gap: 16px; padding: 13px 15px; border: 1px solid #8a6138; border-radius: 9px; background: #282116; box-shadow: 0 18px 55px rgba(0,0,0,.55); }
 .visual-tie-confirmation > div:first-child { display: flex; align-items: center; gap: 10px; }
@@ -366,11 +305,6 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .marker-empty.is-active { color: #754900; }
 .marker-chip { border-color: var(--line); background: #fff9ed; color: var(--paper); }
 .marker-chip.is-unknown { color: #633f35; }
-.listener-card { border-color: var(--line); background: #eee3cd; }
-.listener-card.is-listening { border-color: var(--paper); background: #e5d2a9; }
-.listener-card small { color: #695f50; }
-.listener-card p { color: var(--paper); }
-.waveform i { background: #776d5d; }
 .camera-note { color: #645b4d; }
 
 .auction-stage { background: #efe3ca; }
@@ -428,7 +362,6 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .team-bid { height: 70px; border-color: var(--line); background: #fff9ed; color: var(--paper); }
 .team-bid:not(:disabled):hover { border-color: #000; background: #f0e3ca; transform: translateY(-1px); }
 .team-bid:disabled { opacity: .52; }
-.team-bid.is-armed:not(.is-high) { border-color: var(--paper); }
 .team-bid.is-high { z-index: 2; border: 2px solid #000; background: #11100d; color: #fff6e5; box-shadow: 5px 5px 0 var(--orange); opacity: 1; transform: translateY(-2px); }
 .team-key, .phone-bid-badge { color: #665d4f; }
 .team-copy small, .team-money small { color: #665d4f; }
@@ -436,8 +369,6 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .team-bid.is-high .team-copy strong, .team-bid.is-high .team-money strong { color: #fff6e5; }
 .team-bid.is-high .team-copy small, .team-bid.is-high .team-money small { color: #c9bba4; }
 .team-bid.is-high .armed-label { color: #e3b451; font-weight: 700; }
-.voice-profile-dot { color: #716756; }
-.team-bid.is-high .voice-profile-dot { color: #d5c8b1; }
 .armed-label { color: #4e463b; }
 .keyboard-hint { color: #5f5648; }
 .keyboard-hint kbd { color: var(--paper); border-color: var(--line); background: #fff9ed; }
@@ -449,30 +380,14 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 
 dialog { border-color: var(--line); background: var(--panel); color: var(--paper); box-shadow: 12px 12px 0 rgba(23,19,14,.24); }
 dialog::backdrop { background: rgba(29,24,17,.48); }
-.dialog-close, dialog form > p, .voice-intro, .voice-footer { color: #5f5648; }
+.dialog-close, dialog form > p { color: #5f5648; }
 .form-grid label { color: #554d41; }
 .form-grid input, .form-grid textarea { border-color: var(--line); background: #fff9ed; color: var(--paper); }
-.voice-ready-banner { border-color: #31563c; background: #dce8d9; color: #244b31; }
-.voice-ready-banner b { color: #294e34; }
-.cloud-interpreter-card { border-color: var(--line); background: #fff9ed; }
-.cloud-interpreter-card.is-active { border-color: var(--line); background: #dce5e8; }
-.cloud-interpreter-card strong, .cloud-interpreter-card p { color: #544c40; }
-.cloud-interpreter-card.is-active strong { color: #284f5f; }
-.voice-error { border-color: #743a2d; background: #efd8cf; color: #6c2418; }
-.enrollment-list { border-color: var(--line); }
-.enrollment-row { border-bottom-color: var(--line); background: #fff9ed; }
-.enrollment-row.is-active { background: #eadbbd; }
-.enrollment-person small, .enrollment-status, .progress-number, .live-score, .enrollment-prompt { color: #62594b; }
-.voice-confirmation { border-color: #000; background: #11100d; color: #f8edda; box-shadow: 7px 7px 0 var(--orange); }
-.voice-confirmation > p, .voice-candidates button small { color: #c7b9a1; }
-.voice-candidates button { border-color: #f8edda; background: transparent; color: #f8edda; }
-.voice-candidates button.reject { color: #c7b9a1; }
 .visual-tie-confirmation { border-color: #000; background: #d9a22a; color: #17130e; box-shadow: 7px 7px 0 #17130e; }
 .visual-tie-confirmation > div:first-child .icon, .visual-tie-confirmation span small, .visual-tie-confirmation > p { color: #17130e; }
 .visual-tie-actions button { border-color: #17130e; background: #17130e; color: #f8edda; }
 .visual-tie-actions button.reject { border-color: #17130e; color: #17130e; }
 
-@keyframes wave { from { height: 4px; } to { height: calc(7px + (var(--i) % 5) * 3px); } }
 @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(211,154,32,0); } }
 
 @media (max-width: 1280px) {
