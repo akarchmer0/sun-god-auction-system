@@ -1,4 +1,5 @@
 import { seedPlayers, makeTeams } from "./data.mjs";
+import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { createAuctioneerScript } from "./auctioneer-script.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
@@ -143,7 +144,12 @@ function render() {
             ${nextPlayers.length ? nextPlayers.map((item, index) => queueRow(item, index)).join("") : `<p class="empty-copy">No players left in the queue.</p>`}
           </div>
           <div class="queue-actions">
-            <button class="text-button" data-action="import">${icon("upload")} Import player CSV</button>
+            <button class="fantasy-pros-button" data-action="load-fantasy-pros" title="Replace the current draft with the supplied FantasyPros player list and auction values">
+              ${icon("database")}
+              <span><strong>Load FantasyPros values</strong><small>${fantasyProsPlayers.length} players · resets draft</small></span>
+              ${icon("arrow")}
+            </button>
+            <button class="text-button csv-import-button" data-action="import">${icon("upload")} Or import player CSV</button>
             <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
           </div>
         </aside>
@@ -298,6 +304,7 @@ function wireGlobalEvents() {
       if (action === "next") return update(moveToNextPlayer(state));
       if (action === "bid") return submitBid(button.dataset.teamId);
       if (action === "undo") { clearTimer(); return update(undoLastSale(state), "Last sale reversed."); }
+      if (action === "load-fantasy-pros") return loadFantasyProsPreset();
       if (action === "import") return document.querySelector("#csv-input")?.click();
     } catch (error) {
       showNotice({ kind: "error", message: error.message });
@@ -331,7 +338,8 @@ function wireGlobalEvents() {
       const [name, manager] = (teamLines[index] || "").split("|").map((part) => part?.trim());
       return { ...team, name: name || team.name, manager: manager || team.manager };
     });
-    state = createDraft({ players: seedPlayers, teams, budget, rosterSize, increment });
+    const players = state.players.map((player) => ({ ...player, status: "available" }));
+    state = createDraft({ players, teams, budget, rosterSize, increment });
     clearVisualBidWindow();
     pendingVisualTie = null;
     persistDraft();
@@ -678,6 +686,23 @@ async function importCsv(file) {
   } catch (error) { showNotice({ kind: "error", message: error.message }); }
 }
 
+function loadFantasyProsPreset() {
+  clearTimer();
+  stopAuctioneer();
+  clearVisualBidWindow();
+  pendingVisualTie = null;
+  state = createDraft({
+    players: fantasyProsPlayers,
+    teams: state.teams.map((team) => ({ ...team, roster: [] })),
+    budget: state.config.budget,
+    rosterSize: state.config.rosterSize,
+    increment: state.config.increment
+  });
+  persistDraft();
+  render();
+  showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} FantasyPros players and auction values. The draft is ready.` });
+}
+
 function update(nextState, message) {
   state = nextState;
   persistDraft();
@@ -765,7 +790,8 @@ function icon(name) {
     alert: '<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5m0 3h.01"/>',
     print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/>',
     expand: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 6-6m12 6-6-6M3 16l6 6m12-6-6 6"/>',
-    cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>'
+    cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>',
+    database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
   };
   return `<svg class="icon icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }

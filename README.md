@@ -57,6 +57,8 @@ Number keys 1–9 place quick bids. Space advances the countdown manually.
 
 ## Player CSV
 
+The **Load FantasyPros values** button on the player board replaces the current draft with the supplied 315-player FantasyPros auction list in a single click. It preserves the league's teams, budget, roster size, and bid increment while clearing sales and rosters for a fresh draft. Because the supplied list does not include NFL-team abbreviations, those players display `FA`; positions are included for draft filtering and display.
+
 Importing a CSV resets the draft. Required columns are `name` and `position`; optional columns are `team` and `value`.
 
 ```csv
@@ -65,7 +67,7 @@ Puka Nacua,WR,LAR,42
 Bijan Robinson,RB,ATL,55
 ```
 
-The included values and player board are demo data, not live rankings.
+The default player board is demo data. The built-in FantasyPros preset reflects the supplied snapshot and does not fetch or silently update values from the internet.
 
 ## Architecture notes
 

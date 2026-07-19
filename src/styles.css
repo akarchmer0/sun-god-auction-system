@@ -202,6 +202,14 @@ button { color: inherit; }
 .queue-value { color: #88877f; font: 500 9px/1 "DM Mono", monospace; }
 .queue-row .icon { width: 12px; color: #565650; }
 .queue-actions { padding: 14px 18px; }
+.fantasy-pros-button { width: 100%; min-height: 54px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; background: var(--paper); color: #f6eedc; text-align: left; cursor: pointer; box-shadow: 3px 3px 0 var(--orange); transition: transform .14s ease, box-shadow .14s ease; }
+.fantasy-pros-button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--orange); }
+.fantasy-pros-button .icon { width: 16px; height: 16px; color: #f3c45e; }
+.fantasy-pros-button .icon-arrow { width: 13px; color: #f6eedc; }
+.fantasy-pros-button strong, .fantasy-pros-button small { display: block; }
+.fantasy-pros-button strong { font-size: 9px; }
+.fantasy-pros-button small { margin-top: 4px; color: #c7bda9; font: 500 7px/1 "DM Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
+.csv-import-button { margin-top: 13px; }
 .text-button { border: 0; background: none; color: #85847c; font-size: 9px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; padding: 4px 0; }
 .text-button:hover { color: var(--paper); }
 .text-button:disabled { opacity: .3; cursor: default; }
