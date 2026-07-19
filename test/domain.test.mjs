@@ -8,7 +8,9 @@ import {
   advanceCountdown,
   maxBidForTeam,
   moveToNextPlayer,
-  undoLastSale
+  undoLastSale,
+  currentNominator,
+  canTeamRosterPlayer
 } from "../src/domain.mjs";
 
 const players = [
@@ -70,4 +72,51 @@ test("a player with no bids rotates to the back of the queue", () => {
   assert.equal(draft.auction.phase, "passed");
   draft = moveToNextPlayer(draft);
   assert.equal(draft.auction.playerId, "bijan");
+});
+
+test("position requirements prevent a purchase that would make the lineup impossible", () => {
+  const rosteredTeams = [
+    { ...teams[0], roster: [{ playerId: "puka", price: 4 }] },
+    teams[1]
+  ];
+  let draft = createDraft({
+    players,
+    teams: rosteredTeams,
+    budget: 20,
+    rosterSize: 2,
+    rosterRequirements: { QB: 1, WR: 1 }
+  });
+  draft.teams[0].roster = [{ playerId: "puka", price: 4 }];
+  draft = openAuction(nominatePlayer(draft, "bijan"));
+  assert.equal(canTeamRosterPlayer(draft, "a", "bijan"), false);
+  assert.throws(() => placeBid(draft, "a", 1), /position requirements/);
+});
+
+test("FLEX requirements accept an extra RB, WR, or TE after base slots", () => {
+  const flexPlayers = [
+    ...players,
+    { id: "tight-end", name: "Tight End", position: "TE", nflTeam: "FA", suggestedValue: 1, status: "available" }
+  ];
+  let draft = createDraft({
+    players: flexPlayers,
+    teams,
+    budget: 20,
+    rosterSize: 3,
+    rosterRequirements: { RB: 1, WR: 1, FLEX: 1 }
+  });
+  draft.teams[0].roster = [{ playerId: "puka", price: 4 }, { playerId: "bijan", price: 4 }];
+  assert.equal(canTeamRosterPlayer(draft, "a", "tight-end"), true);
+});
+
+test("nomination order advances after a result and rewinds with undo", () => {
+  let draft = createDraft({ players, teams, budget: 20, rosterSize: 3, nominationOrder: ["b", "a"] });
+  assert.equal(currentNominator(draft).id, "b");
+  draft = openAuction(nominatePlayer(draft, "puka"));
+  assert.equal(draft.auction.nominatorTeamId, "b");
+  draft = placeBid(draft, "a", 5);
+  draft = advanceCountdown(advanceCountdown(advanceCountdown(draft)));
+  assert.equal(currentNominator(draft).id, "a");
+  draft = undoLastSale(draft);
+  assert.equal(currentNominator(draft).id, "b");
+  assert.equal(draft.auction.nominatorTeamId, "b");
 });

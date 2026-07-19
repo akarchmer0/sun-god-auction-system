@@ -70,6 +70,30 @@ test("phones can submit arbitrary legal whole-dollar bids", () => {
   assert.throws(() => hub.placeBid({ roomId: "JMP222", teamId: "team-1", participantToken: phoneOne, amount: 11.5 }), /whole-dollar/);
 });
 
+test("phone bids honor host-calculated position eligibility", () => {
+  const hub = new PhoneRoomHub({ now: () => 6000 });
+  hub.upsertRoom({ roomId: "POS222", hostKey, teams });
+  hub.claimTeam({ roomId: "POS222", teamId: "team-1", participantToken: phoneOne });
+  hub.updateAuction({
+    roomId: "POS222",
+    hostKey,
+    auction: { phase: "open", amount: 4, nextBid: 5, acceptingBids: true },
+    teams: teams.map((team) => ({
+      id: team.id,
+      budget: 200,
+      rosterCount: 14,
+      rosterSize: 15,
+      maxBid: 100,
+      eligibleForPlayer: team.id !== "team-1"
+    }))
+  });
+  assert.equal(hub.snapshot("POS222").teams[0].eligibleForPlayer, false);
+  assert.throws(
+    () => hub.placeBid({ roomId: "POS222", teamId: "team-1", participantToken: phoneOne }),
+    /required positions/
+  );
+});
+
 test("room subscribers receive claim, state, and bid events", () => {
   let now = 3000;
   const hub = new PhoneRoomHub({ now: () => now });

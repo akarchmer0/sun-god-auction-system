@@ -47,11 +47,23 @@ The QR code is generated locally. Phone requests stay between the participant de
 
 ## Draft flow
 
-1. Click a player in **On deck** to nominate them.
+1. The manager shown as **is up** chooses a player; click that player in **On deck** to nominate them.
 2. Click **Start auction**.
 3. Participants tap **Bid** on their phones. The laptop team buttons and number keys remain available to the operator for administration and rulings.
 4. The automatic countdown gives the room eight seconds before “going once,” then five seconds before “going twice,” and just over four seconds before sale. Any valid bid resets it.
 5. Completed sales update the team's budget and roster. **Undo last** reverses the most recent sale.
+
+The nomination turn follows the order configured during league setup and advances after either a sale or a no-bid pass. Undoing a sale restores the prior nominator along with the player, budget, and roster.
+
+## Five-minute league setup
+
+Open **League setup** from the header to configure a draft in three guided steps:
+
+1. Set the team count, salary cap, and bid increment.
+2. Set required QB, RB, WR, TE, FLEX, K, and DST slots plus unrestricted bench slots. FLEX accepts RB, WR, or TE.
+3. Enter teams and managers from top to bottom in their repeating nomination order.
+
+Roster requirements are draft rules, not just a template. Sun God blocks laptop and phone bids when buying that player's position would leave the team with too few open roster spots to complete its required lineup. The usual one-dollar reserve for every remaining roster spot still applies.
 
 Number keys 1–9 place quick bids. Space advances the countdown manually.
 

@@ -199,7 +199,8 @@ function renderBidder() {
   const player = auction.player;
   const hasHighBid = auction.highBidderId === team.id;
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
-  const canBid = auction.acceptingBids && !hasHighBid && canAfford && !sendingBid;
+  const hasRosterFit = team.eligibleForPlayer !== false;
+  const canBid = auction.acceptingBids && !hasHighBid && canAfford && hasRosterFit && !sendingBid;
   const easyBids = easyBidAmounts({
     currentBid: auction.amount,
     nextBid: auction.nextBid,
@@ -214,6 +215,8 @@ function renderBidder() {
         ? "WAITING FOR AUCTION"
         : !canAfford
           ? "MAX BID REACHED"
+          : !hasRosterFit
+            ? "POSITION SLOTS RESERVED"
           : `BID $${auction.nextBid}`;
   const roster = Array.isArray(team.roster) ? team.roster : [];
   const auctionTab = `<div class="phone-lot ${player ? "" : "is-empty"}">

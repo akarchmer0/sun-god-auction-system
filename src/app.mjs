@@ -18,7 +18,10 @@ import {
   moveToNextPlayer,
   undoLastSale,
   currentPlayer,
-  maxBidForTeam
+  maxBidForTeam,
+  currentNominator,
+  canTeamRosterPlayer,
+  ROSTER_POSITIONS
 } from "./domain.mjs";
 
 const STORAGE_KEY = "gavel-draft-v1";
@@ -26,10 +29,18 @@ const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
 const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120 };
+const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
-let state = restoreDraft() || createDraft({ players: seedPlayers, teams: makeTeams(), budget: 200, rosterSize: 15 });
+let state = restoreDraft() || createDraft({
+  players: seedPlayers,
+  teams: makeTeams(),
+  budget: 200,
+  rosterSize: 15,
+  rosterRequirements: STANDARD_ROSTER_REQUIREMENTS
+});
 let voiceEnabled = true;
 let autoEnabled = true;
+let setupStep = 1;
 let countdownTimer = null;
 let notice = null;
 let pendingVisualTie = null;
@@ -70,6 +81,8 @@ void initializePhoneRoom();
 function render() {
   const player = currentPlayer(state);
   const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
+  const nextNominator = currentNominator(state);
+  const lotNominator = state.teams.find((team) => team.id === state.auction.nominatorTeamId) || nextNominator;
   const available = state.players.filter((item) => item.status === "available");
   const nextPlayers = state.queue
     .map((id) => state.players.find((item) => item.id === id))
@@ -89,6 +102,8 @@ function render() {
           <span class="room-divider"></span>
           <span>${state.sales.length} sold</span>
           <span>${available.length} available</span>
+          <span class="room-divider"></span>
+          <span>${escapeHtml(nextNominator?.manager || "Commissioner")} ${["sold", "passed"].includes(state.auction.phase) ? "nominates next" : "nominates"}</span>
         </div>
         <div class="device-controls">
           <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
@@ -131,12 +146,12 @@ function render() {
 
         <section class="auction-stage">
           <div class="stage-glow"></div>
-          ${player ? playerCard(player, highBidder) : emptyStage()}
+          ${player ? playerCard(player, highBidder, lotNominator) : emptyStage(nextNominator)}
         </section>
 
         <aside class="queue-panel panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">ON DECK</span><h2>Player board</h2></div>
+            <div><span class="eyebrow">ON DECK</span><h2>Player board</h2><span class="nomination-chip">${escapeHtml(nextNominator?.manager || "Commissioner")} is up</span></div>
             <label class="search-box">${icon("search")}<input id="player-search" placeholder="Find player" autocomplete="off" /></label>
           </div>
           <div id="search-results" class="search-results"></div>
@@ -183,7 +198,7 @@ function render() {
   `;
 }
 
-function playerCard(player, highBidder) {
+function playerCard(player, highBidder, nominator) {
   const canOpen = ["ready", "paused"].includes(state.auction.phase);
   const inProgress = ["open", "once", "twice"].includes(state.auction.phase);
   const done = ["sold", "passed"].includes(state.auction.phase);
@@ -191,7 +206,7 @@ function playerCard(player, highBidder) {
     ? `SOLD TO ${highBidder?.name?.toUpperCase()}`
     : state.auction.phase === "passed" ? "NO SALE" : phaseLabel(state.auction.phase).toUpperCase();
   return `
-    <div class="lot-number">LOT ${String(state.sales.length + 1).padStart(2, "0")}</div>
+    <div class="lot-number">LOT ${String(state.sales.length + 1).padStart(2, "0")} · ${escapeHtml(nominator?.manager || "Commissioner")}’S NOMINATION</div>
     <div class="position-badge">${player.position}</div>
     <div class="player-identity">
       <span class="nfl-team">${player.nflTeam}</span>
@@ -217,8 +232,8 @@ function playerCard(player, highBidder) {
   `;
 }
 
-function emptyStage() {
-  return `<div class="empty-stage"><span class="sun-mark large">${sunLogo()}</span><span class="eyebrow">THE ROOM IS READY</span><h1>Nominate the first player</h1><p>Choose a player from the board to begin the draft.</p></div>`;
+function emptyStage(nominator) {
+  return `<div class="empty-stage"><span class="sun-mark large">${sunLogo()}</span><span class="eyebrow">${escapeHtml(nominator?.manager || "COMMISSIONER")} IS ON THE CLOCK</span><h1>Nominate the first player</h1><p>Choose a player from the board to begin the draft.</p></div>`;
 }
 
 function queueRow(player, index) {
@@ -235,8 +250,10 @@ function teamBidButton(team, index) {
   const isHigh = team.id === state.auction.highBidderId;
   const maxBid = maxBidForTeam(state, team.id);
   const phoneJoined = phoneRoom.claimedTeamIds.includes(team.id);
-  const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || maxBid < Math.max(1, state.auction.amount + state.config.increment);
-  return `<button class="team-bid ${isHigh ? "is-high" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" ${disabled ? "disabled" : ""}>
+  const legalRosterFit = !state.auction.playerId || canTeamRosterPlayer(state, team.id, state.auction.playerId);
+  const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || !legalRosterFit || maxBid < Math.max(1, state.auction.amount + state.config.increment);
+  const title = !legalRosterFit ? "This player would prevent the team from completing its required positions." : "";
+  return `<button class="team-bid ${isHigh ? "is-high" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" title="${escapeHtml(title)}" ${disabled ? "disabled" : ""}>
     <span class="team-key" title="Keyboard shortcut ${index < 9 ? index + 1 : "unassigned"}">${index < 9 ? index + 1 : ""}</span>
     <span class="team-swatch"></span>
     <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
@@ -253,17 +270,42 @@ function saleRow(sale) {
 }
 
 function setupDialog() {
+  const requirements = normalizedRequirements();
+  const requiredSlots = Object.values(requirements).reduce((sum, value) => sum + value, 0);
+  const benchSlots = Math.max(0, state.config.rosterSize - requiredSlots);
+  const orderedTeams = orderedTeamsForSetup();
   return `<form id="setup-form" method="dialog">
-    <div class="dialog-head"><div><span class="eyebrow">LEAGUE CONTROL</span><h2>Start a new draft</h2></div><button type="button" data-action="close-setup" class="dialog-close" aria-label="Close">×</button></div>
-    <p>Reset the room with a standard salary-cap format. Enter one team per line as <strong>Team name | Manager</strong>.</p>
-    <div class="form-grid">
-      <label>Teams<input name="teamCount" type="number" min="2" max="12" value="${state.teams.length}" required /></label>
-      <label>Budget per team<input name="budget" type="number" min="20" max="1000" value="${state.config.budget}" required /></label>
-      <label>Roster size<input name="rosterSize" type="number" min="1" max="30" value="${state.config.rosterSize}" required /></label>
-      <label>Bid increment<input name="increment" type="number" min="1" max="20" value="${state.config.increment}" required /></label>
-      <label class="team-name-field">Teams and managers<textarea name="teamNames" rows="${Math.min(12, Math.max(4, state.teams.length))}">${escapeHtml(state.teams.map((team) => `${team.name} | ${team.manager}`).join("\n"))}</textarea></label>
+    <div class="dialog-head"><div><span class="eyebrow">5-MINUTE LEAGUE SETUP</span><h2>Start a new draft</h2></div><button type="button" data-action="close-setup" class="dialog-close" aria-label="Close">×</button></div>
+    <div class="setup-progress" aria-label="Setup progress">
+      ${["League", "Roster", "Nomination order"].map((label, index) => `<span data-progress-step="${index + 1}" class="${setupStep === index + 1 ? "is-active" : setupStep > index + 1 ? "is-done" : ""}"><i>${index + 1}</i>${label}</span>`).join("")}
     </div>
-    <div class="dialog-actions"><button type="button" data-action="close-setup" class="secondary-action">Cancel</button><button type="submit" class="primary-action">Create draft room</button></div>
+    <section class="setup-step ${setupStep === 1 ? "is-active" : ""}" data-setup-step="1">
+      <p>Set the salary-cap basics. The next two steps define legal rosters and who nominates.</p>
+      <div class="form-grid">
+        <label>Teams<input name="teamCount" type="number" min="2" max="12" value="${state.teams.length}" required /></label>
+        <label>Budget per team<input name="budget" type="number" min="20" max="1000" value="${state.config.budget}" required /></label>
+        <label>Bid increment<input name="increment" type="number" min="1" max="20" value="${state.config.increment}" required /></label>
+      </div>
+    </section>
+    <section class="setup-step ${setupStep === 2 ? "is-active" : ""}" data-setup-step="2">
+      <p>Set minimum position slots. FLEX accepts RB, WR, or TE; bench slots accept any position.</p>
+      <div class="position-requirements">
+        ${ROSTER_POSITIONS.map((position) => `<label><span>${position}</span><input name="position_${position}" type="number" min="0" max="10" value="${requirements[position]}" required /></label>`).join("")}
+        <label class="bench-position"><span>BENCH</span><input name="benchSlots" type="number" min="0" max="20" value="${benchSlots}" required /></label>
+      </div>
+      <p class="setup-tip">Sun God blocks a bid when that purchase would leave too few open slots to finish the required lineup.</p>
+    </section>
+    <section class="setup-step ${setupStep === 3 ? "is-active" : ""}" data-setup-step="3">
+      <p>Enter one team per line as <strong>Team name | Manager</strong>. This top-to-bottom list is the repeating nomination order.</p>
+      <label class="team-name-field">Teams, managers, and order<textarea name="teamNames" rows="${Math.min(12, Math.max(4, state.teams.length))}" required>${escapeHtml(orderedTeams.map((team) => `${team.name} | ${team.manager}`).join("\n"))}</textarea></label>
+      <div class="order-preview"><span>NOMINATION FLOW</span><strong>Top → bottom → repeat</strong></div>
+    </section>
+    <div class="dialog-actions">
+      <button type="button" data-action="close-setup" class="text-button setup-cancel">Cancel</button>
+      <button type="button" data-action="setup-back" class="secondary-action setup-back">Back</button>
+      <button type="button" data-action="setup-next" class="primary-action setup-next">Continue ${icon("arrow")}</button>
+      <button type="submit" class="primary-action setup-submit">Create draft room</button>
+    </div>
   </form>`;
 }
 
@@ -288,8 +330,17 @@ function wireGlobalEvents() {
     if (!button) return;
     const action = button.dataset.action;
     try {
-      if (action === "setup") return document.querySelector("#setup-dialog")?.showModal();
+      if (action === "setup") {
+        setupStep = 1;
+        showSetupStep(1);
+        return document.querySelector("#setup-dialog")?.showModal();
+      }
       if (action === "close-setup") return document.querySelector("#setup-dialog")?.close();
+      if (action === "setup-next") {
+        if (!validateSetupStep(setupStep)) return;
+        return showSetupStep(Math.min(3, setupStep + 1));
+      }
+      if (action === "setup-back") return showSetupStep(Math.max(1, setupStep - 1));
       if (action === "resolve-visual-tie") return resolveVisualTie(button.dataset.teamId);
       if (action === "cancel-visual-tie") return cancelVisualTie();
       if (action === "dismiss-notice") return showNotice(null);
@@ -331,15 +382,26 @@ function wireGlobalEvents() {
     const data = new FormData(event.target);
     const teamCount = Number(data.get("teamCount"));
     const budget = Number(data.get("budget"));
-    const rosterSize = Number(data.get("rosterSize"));
     const increment = Number(data.get("increment"));
+    const rosterRequirements = Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(data.get(`position_${position}`)) || 0]));
+    const benchSlots = Number(data.get("benchSlots")) || 0;
+    const rosterSize = Object.values(rosterRequirements).reduce((sum, value) => sum + value, benchSlots);
+    if (rosterSize < 1) return showNotice({ kind: "error", message: "Add at least one starting or bench roster slot." });
     const teamLines = String(data.get("teamNames") || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const teams = makeTeams(teamCount, budget).map((team, index) => {
       const [name, manager] = (teamLines[index] || "").split("|").map((part) => part?.trim());
       return { ...team, name: name || team.name, manager: manager || team.manager };
     });
     const players = state.players.map((player) => ({ ...player, status: "available" }));
-    state = createDraft({ players, teams, budget, rosterSize, increment });
+    state = createDraft({
+      players,
+      teams,
+      budget,
+      rosterSize,
+      increment,
+      rosterRequirements,
+      nominationOrder: teams.map((team) => team.id)
+    });
     clearVisualBidWindow();
     pendingVisualTie = null;
     persistDraft();
@@ -502,6 +564,7 @@ function canPlaceVisualBid(teamId, amount) {
     && ["open", "once", "twice"].includes(state.auction.phase)
     && state.auction.highBidderId !== teamId
     && team.roster.length < state.config.rosterSize
+    && canTeamRosterPlayer(state, teamId, state.auction.playerId)
     && amount >= nextVisualBidAmount(state)
     && amount <= maxBidForTeam(state, teamId)
   );
@@ -606,6 +669,7 @@ async function syncPhoneRoomState() {
         budget: team.budget,
         rosterCount: team.roster.length,
         rosterSize: state.config.rosterSize,
+        eligibleForPlayer: !player || canTeamRosterPlayer(state, team.id, player.id),
         maxBid: maxBidForTeam(state, team.id),
         roster: team.roster.map((spot) => {
           const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
@@ -679,7 +743,15 @@ async function importCsv(file) {
         status: "available"
       };
     }).filter((player) => player.name);
-    state = createDraft({ players: imported, teams: state.teams.map((team) => ({ ...team, roster: [] })), budget: state.config.budget, rosterSize: state.config.rosterSize, increment: state.config.increment });
+    state = createDraft({
+      players: imported,
+      teams: state.teams.map((team) => ({ ...team, roster: [] })),
+      budget: state.config.budget,
+      rosterSize: state.config.rosterSize,
+      increment: state.config.increment,
+      rosterRequirements: normalizedRequirements(),
+      nominationOrder: state.nomination?.order
+    });
     persistDraft();
     render();
     showNotice({ kind: "success", message: `Imported ${imported.length} players and reset the draft.` });
@@ -696,7 +768,9 @@ function loadFantasyProsPreset() {
     teams: state.teams.map((team) => ({ ...team, roster: [] })),
     budget: state.config.budget,
     rosterSize: state.config.rosterSize,
-    increment: state.config.increment
+    increment: state.config.increment,
+    rosterRequirements: normalizedRequirements(),
+    nominationOrder: state.nomination?.order
   });
   persistDraft();
   render();
@@ -750,7 +824,49 @@ function auctioneerVoiceTitle() {
 }
 
 function restoreDraft() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
+  try {
+    const restored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (!restored) return null;
+    restored.config = {
+      ...restored.config,
+      rosterRequirements: Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(restored.config?.rosterRequirements?.[position]) || 0]))
+    };
+    restored.nomination ||= { order: restored.teams.map((team) => team.id), currentIndex: 0 };
+    restored.auction = { nominatorTeamId: null, ...restored.auction };
+    return restored;
+  } catch { return null; }
+}
+
+function normalizedRequirements() {
+  return Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(state.config.rosterRequirements?.[position]) || 0]));
+}
+
+function orderedTeamsForSetup() {
+  const byId = new Map(state.teams.map((team) => [team.id, team]));
+  const ordered = (state.nomination?.order || []).map((id) => byId.get(id)).filter(Boolean);
+  return [...ordered, ...state.teams.filter((team) => !ordered.includes(team))];
+}
+
+function validateSetupStep(step) {
+  const section = document.querySelector(`[data-setup-step="${step}"]`);
+  const invalid = [...(section?.querySelectorAll("input, textarea") || [])].find((input) => !input.checkValidity());
+  invalid?.reportValidity();
+  return !invalid;
+}
+
+function showSetupStep(step) {
+  setupStep = step;
+  document.querySelectorAll("[data-setup-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.setupStep) === step));
+  document.querySelectorAll("[data-progress-step]").forEach((item) => {
+    const itemStep = Number(item.dataset.progressStep);
+    item.classList.toggle("is-active", itemStep === step);
+    item.classList.toggle("is-done", itemStep < step);
+    const marker = item.querySelector("i");
+    if (marker) marker.textContent = itemStep < step ? "✓" : String(itemStep);
+  });
+  document.querySelector(".setup-back")?.toggleAttribute("hidden", step === 1);
+  document.querySelector(".setup-next")?.toggleAttribute("hidden", step === 3);
+  document.querySelector(".setup-submit")?.toggleAttribute("hidden", step !== 3);
 }
 
 function phaseLabel(phase) {

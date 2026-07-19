@@ -109,6 +109,7 @@ export class PhoneRoomHub {
     if (!auction?.acceptingBids) throw roomError("Bidding is not open yet.", 409);
     if (auction.highBidderId === teamId) throw roomError("You already have the high bid.", 409);
     const team = this.snapshot(room.id).teams.find((item) => item.id === teamId);
+    if (team?.eligibleForPlayer === false) throw roomError("This player would leave too few spots for your required positions.", 409);
     if (!team || Number(team.maxBid) < Number(auction.nextBid)) throw roomError("Your team cannot place the next legal bid.", 409);
     const bidAmount = amount == null ? Number(auction.nextBid) : Number(amount);
     if (!Number.isInteger(bidAmount)) throw roomError("Enter a whole-dollar bid.", 400);
@@ -193,6 +194,7 @@ function normalizeLiveTeams(teams, roomTeams) {
       rosterCount: boundedNumber(team.rosterCount ?? roster.length),
       rosterSize: boundedNumber(team.rosterSize),
       maxBid: boundedNumber(team.maxBid),
+      eligibleForPlayer: team.eligibleForPlayer !== false,
       roster
     };
   }) : [];
