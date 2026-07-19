@@ -15,6 +15,12 @@ const DIRECTIONS = Object.freeze({
   neutral: { speed: 1.0, emotion: "neutral" }
 });
 
+const PERSONALITY_DIRECTIONS = Object.freeze({
+  classic: { speed: 0, emotion: null },
+  hype: { speed: 0.05, emotion: "excited" },
+  pro: { speed: 0.03, emotion: "determined" }
+});
+
 export class CartesiaSpeechService {
   constructor({
     apiKey,
@@ -74,7 +80,7 @@ export class CartesiaSpeechService {
     return true;
   }
 
-  async createSpeech({ transcript, style = "neutral", onEvent }) {
+  async createSpeech({ transcript, style = "neutral", personality = "classic", energy = 2, onEvent }) {
     const text = String(transcript || "").trim().slice(0, 1_500);
     if (!text) throw serviceError("Auctioneer speech text is required.", 400);
     if (!this.status().available) throw serviceError(this.status().message, 503);
@@ -99,6 +105,8 @@ export class CartesiaSpeechService {
         contextId,
         transcript: text,
         style,
+        personality,
+        energy,
         voiceId: this.voiceId,
         model: this.model,
         sampleRate: this.sampleRate
@@ -225,11 +233,18 @@ export class CartesiaSpeechService {
   }
 }
 
-export function speechDirections(style) {
-  return DIRECTIONS[style] || DIRECTIONS.neutral;
+export function speechDirections(style, { personality = "classic", energy = 2 } = {}) {
+  const base = DIRECTIONS[style] || DIRECTIONS.neutral;
+  const persona = PERSONALITY_DIRECTIONS[personality] || PERSONALITY_DIRECTIONS.classic;
+  const level = Math.min(3, Math.max(1, Number(energy) || 2));
+  const energySpeed = (level - 2) * 0.07;
+  const emotion = level === 1 && ["excited", "triumphant", "enthusiastic"].includes(base.emotion)
+    ? "content"
+    : persona.emotion || base.emotion;
+  return { speed: Number((base.speed + persona.speed + energySpeed).toFixed(2)), emotion };
 }
 
-export function buildCartesiaGeneration({ contextId, transcript, style, voiceId, model, sampleRate }) {
+export function buildCartesiaGeneration({ contextId, transcript, style, personality = "classic", energy = 2, voiceId, model, sampleRate }) {
   return {
     model_id: model,
     transcript,
@@ -237,7 +252,7 @@ export function buildCartesiaGeneration({ contextId, transcript, style, voiceId,
     language: "en",
     context_id: contextId,
     output_format: { container: "raw", encoding: "pcm_s16le", sample_rate: sampleRate },
-    generation_config: speechDirections(style),
+    generation_config: speechDirections(style, { personality, energy }),
     add_timestamps: false,
     continue: false
   };

@@ -20,3 +20,14 @@ test("auction script covers countdowns, rulings, and sales", () => {
   assert.match(script.simultaneous({ amount: 43, managers: "Alex and Jordan" }), /simultaneous bids.*43.*Alex and Jordan/i);
   assert.match(script.sold({ player: { name: "Puka Nacua" }, team: { name: "Sun Kings", manager: "Alex" }, amount: 44 }), /Puka Nacua.*44|44.*Puka Nacua/i);
 });
+
+test("auctioneer personalities change the room voice and include preflight", () => {
+  const classic = createAuctioneerScript({ personality: "classic" });
+  const hype = createAuctioneerScript({ personality: "hype" });
+  const pro = createAuctioneerScript({ personality: "pro" });
+  const player = { name: "Puka Nacua", position: "WR", nflTeam: "LAR" };
+  assert.notEqual(classic.nomination(player), hype.nomination(player));
+  assert.notEqual(hype.nomination(player), pro.nomination(player));
+  assert.match(classic.preflight(), /Can you hear Lucy/i);
+  assert.match(hype.preflight(), /draft room/i);
+});

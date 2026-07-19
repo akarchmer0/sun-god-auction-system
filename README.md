@@ -31,6 +31,10 @@ Sun God keeps a Cartesia WebSocket warm on the Mac and streams raw audio to the 
 
 The permanent Cartesia key stays in the Mac's local `.env` file and is read only by `server.mjs`. The browser receives only generated PCM audio. The default is Cartesia's British Lucy voice on `sonic-3.5`; set `CARTESIA_VOICE_ID` in `.env` to any voice ID from the Cartesia playground to change it. If Cartesia is unconfigured or temporarily unavailable, Sun God automatically uses the operating system's browser voice so the draft can continue.
 
+Click the volume control to open **Lucy’s booth** before the draft. The room check speaks “Can you hear Lucy?” using the currently selected settings. Choose among Lucy Classic, Hype House, and League Pro personalities, then set the energy to Measured, Draft night, or Full send. These choices change both the auction script and realtime performance direction and persist on the draft laptop.
+
+Completed countdown calls are cached in a bounded in-memory audio cache, keyed by phrase, voice, personality, and energy. Repeated calls can play without another generation round trip. If realtime speech is unavailable or stalls, the host switches that announcement to a preferred English browser voice with matching energy and pacing. Opening Lucy’s booth refreshes status and retries the configured realtime provider.
+
 ## Phone bidding
 
 The laptop creates a private room code and a join link using its local network address. No participant app or account is required.

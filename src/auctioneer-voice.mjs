@@ -6,6 +6,7 @@ export class AuctioneerVoice {
     AudioContextImpl = globalThis.AudioContext || globalThis.webkitAudioContext,
     speechSynthesisImpl = globalThis.speechSynthesis,
     UtteranceImpl = globalThis.SpeechSynthesisUtterance,
+    streamTimeoutMs = 4_500,
     onStatusChange = () => {}
   } = {}) {
     this.endpoint = endpoint;
@@ -14,6 +15,7 @@ export class AuctioneerVoice {
     this.AudioContextImpl = AudioContextImpl;
     this.speechSynthesis = speechSynthesisImpl;
     this.UtteranceImpl = UtteranceImpl;
+    this.streamTimeoutMs = streamTimeoutMs;
     this.onStatusChange = onStatusChange;
     this.audioContext = null;
     this.active = null;
@@ -36,7 +38,7 @@ export class AuctioneerVoice {
     return Boolean(this.active);
   }
 
-  speak(text, { style = "neutral", priority = 0, onDone } = {}) {
+  speak(text, { style = "neutral", priority = 0, personality = "classic", energy = 2, onDone } = {}) {
     const transcript = String(text || "").trim();
     if (!transcript) { onDone?.(); return; }
     this.cancel();
@@ -54,10 +56,10 @@ export class AuctioneerVoice {
     };
     this.active = active;
     if (this.status.available === false || !this.AudioContextImpl) {
-      this.#speakWithBrowser(transcript, active);
+      this.#speakWithBrowser(transcript, active, { style, personality, energy });
       return;
     }
-    void this.#streamCartesia(transcript, style, active);
+    void this.#streamCartesia(transcript, { style, personality, energy }, active);
   }
 
   cancel() {
@@ -76,14 +78,14 @@ export class AuctioneerVoice {
     this.speechSynthesis?.cancel();
   }
 
-  async #streamCartesia(transcript, style, active) {
+  async #streamCartesia(transcript, performance, active) {
     try {
-      const response = await this.fetchImpl(this.endpoint, {
+      const response = await withTimeout(this.fetchImpl(this.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: transcript, style }),
+        body: JSON.stringify({ text: transcript, ...performance }),
         signal: active.abortController.signal
-      });
+      }), this.streamTimeoutMs, () => active.abortController.abort());
       if (!response.ok || !response.body) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.error || "Cartesia speech is unavailable.");
@@ -92,7 +94,7 @@ export class AuctioneerVoice {
       const decoder = new TextDecoder();
       let buffer = "";
       while (this.active === active) {
-        const { done, value } = await reader.read();
+        const { done, value } = await withTimeout(reader.read(), this.streamTimeoutMs, () => active.abortController.abort());
         buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
         let newline;
         while ((newline = buffer.indexOf("\n")) >= 0) {
@@ -106,9 +108,8 @@ export class AuctioneerVoice {
       this.#finishWhenAudioEnds(active);
     } catch (error) {
       if (error?.name === "AbortError" || this.active !== active) return;
-      const retryable = this.status.configured !== false;
-      this.#setStatus({ status: "fallback", available: retryable, provider: retryable ? "cartesia" : "browser", message: `${error.message} Browser voice fallback is active for this announcement.` });
-      if (!active.playedAudio) this.#speakWithBrowser(transcript, active);
+      this.#setStatus({ status: "fallback", available: false, provider: "browser", message: `${error.message} Browser voice fallback is active.` });
+      if (!active.playedAudio) this.#speakWithBrowser(transcript, active, performance);
       else this.#finish(active);
     }
   }
@@ -158,14 +159,17 @@ export class AuctioneerVoice {
     if (active.streamDone && active.pendingSources === 0) this.#finish(active);
   }
 
-  #speakWithBrowser(transcript, active) {
+  #speakWithBrowser(transcript, active, { style = "neutral", personality = "classic", energy = 2 } = {}) {
     if (!this.speechSynthesis || !this.UtteranceImpl || this.active !== active) return this.#finish(active);
     this.speechSynthesis.cancel();
     const utterance = new this.UtteranceImpl(transcript);
-    utterance.rate = 1.08;
-    utterance.pitch = 0.84;
+    const level = Math.min(3, Math.max(1, Number(energy) || 2));
+    const personalityRate = ({ classic: 0, hype: 0.08, pro: 0.05 })[personality] || 0;
+    const styleRate = style === "countdown" ? -0.04 : style === "bid" ? 0.04 : 0;
+    utterance.rate = Number((1.03 + (level - 2) * 0.08 + personalityRate + styleRate).toFixed(2));
+    utterance.pitch = personality === "hype" ? 1.04 : personality === "pro" ? 0.94 : 1;
     const voices = this.speechSynthesis.getVoices();
-    utterance.voice = voices.find((voice) => /Daniel|Alex|Google UK English Male/i.test(voice.name))
+    utterance.voice = voices.find((voice) => /Samantha|Karen|Moira|Google UK English Female|Microsoft Sonia/i.test(voice.name))
       || voices.find((voice) => voice.lang.startsWith("en"))
       || null;
     utterance.onend = () => this.#finish(active);
@@ -184,6 +188,20 @@ export class AuctioneerVoice {
     this.status = { ...this.status, ...nextStatus };
     this.onStatusChange(this.status);
   }
+}
+
+function withTimeout(promise, timeoutMs, onTimeout) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout?.();
+      const error = new Error("Cartesia did not respond in time.");
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 export function decodePcm16(base64) {

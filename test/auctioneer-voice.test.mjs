@@ -39,3 +39,27 @@ test("a new fallback announcement interrupts the previous one", () => {
   assert.equal(secondFinished, true);
   assert.ok(cancelCount >= 2);
 });
+
+test("a stalled realtime stream fails over to an energetic browser voice", async () => {
+  const utterances = [];
+  class FakeUtterance { constructor(text) { this.text = text; } }
+  const speechSynthesis = {
+    cancel() {},
+    getVoices() { return [{ name: "Samantha", lang: "en-US" }]; },
+    speak(utterance) { utterances.push(utterance); }
+  };
+  const voice = new AuctioneerVoice({
+    fetchImpl: () => new Promise(() => {}),
+    AudioContextImpl: class {},
+    speechSynthesisImpl: speechSynthesis,
+    UtteranceImpl: FakeUtterance,
+    streamTimeoutMs: 5
+  });
+  voice.status.available = true;
+  voice.speak("Can you hear Lucy?", { personality: "hype", energy: 3 });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(utterances.length, 1);
+  assert.equal(utterances[0].voice.name, "Samantha");
+  assert.ok(utterances[0].rate > 1.1);
+  assert.equal(voice.status.provider, "browser");
+});

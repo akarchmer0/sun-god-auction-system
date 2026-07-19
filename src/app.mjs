@@ -1,7 +1,7 @@
 import { seedPlayers, makeTeams } from "./data.mjs";
 import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
-import { createAuctioneerScript } from "./auctioneer-script.mjs";
+import { createAuctioneerScript, AUCTIONEER_PERSONALITIES } from "./auctioneer-script.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import {
   parseCsv,
@@ -34,8 +34,9 @@ import {
 const STORAGE_KEY = "gavel-draft-v1";
 const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
+const AUCTIONEER_PROFILE_STORAGE_KEY = "sun-god-auctioneer-profile-v1";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
-const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120 };
+const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120, preflight: 130 };
 const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({
@@ -45,7 +46,8 @@ let state = restoreDraft() || createDraft({
   rosterSize: 15,
   rosterRequirements: STANDARD_ROSTER_REQUIREMENTS
 });
-let voiceEnabled = true;
+let auctioneerProfile = restoreAuctioneerProfile();
+let voiceEnabled = auctioneerProfile.enabled;
 let autoEnabled = true;
 let setupStep = 1;
 let pendingCsvImport = null;
@@ -71,14 +73,17 @@ let auctioneerService = {
   voiceId: null,
   message: "Checking Cartesia's realtime auctioneer."
 };
-const auctioneerScript = createAuctioneerScript();
+let auctioneerScript = createAuctioneerScript(auctioneerProfile);
 const auctioneerVoice = new AuctioneerVoice({
   onStatusChange: (snapshot) => {
     const changed = snapshot.status !== auctioneerService.status
       || snapshot.available !== auctioneerService.available
       || snapshot.message !== auctioneerService.message;
     auctioneerService = snapshot;
-    if (changed) render();
+    if (changed) {
+      if (document.querySelector("#audio-dialog")?.open) updateAudioServiceStatus();
+      else render();
+    }
   }
 });
 render();
@@ -115,7 +120,7 @@ function render() {
         </div>
         <div class="device-controls">
           <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
-          <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="voice" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
+          <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="audio-settings" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
       </header>
@@ -205,6 +210,7 @@ function render() {
     </div>
     <dialog id="setup-dialog">${setupDialog()}</dialog>
     <dialog id="csv-mapping-dialog">${pendingCsvImport ? csvMappingDialog() : ""}</dialog>
+    <dialog id="audio-dialog">${audioDialog()}</dialog>
   `;
 }
 
@@ -346,6 +352,27 @@ function csvMappingDialog() {
   </form>`;
 }
 
+function audioDialog() {
+  return `<form id="audio-form" method="dialog">
+    <div class="dialog-head"><div><span class="eyebrow">AUCTIONEER AUDIO</span><h2>Lucy’s booth</h2></div><button type="button" data-action="close-audio" class="dialog-close" aria-label="Close">×</button></div>
+    <div class="audio-provider-card ${auctioneerService.provider === "browser" ? "is-fallback" : ""}">
+      <span class="audio-provider-icon">${icon("volume")}</span>
+      <span><small data-audio-provider-label>${escapeHtml(audioProviderLabel())}</small><strong data-audio-provider-message>${escapeHtml(auctioneerService.message)}</strong></span>
+      <i></i>
+    </div>
+    <label class="audio-enabled-row"><span><strong>Auctioneer voice</strong><small>Keep announcements, countdowns, and rulings audible.</small></span><input name="enabled" type="checkbox" ${voiceEnabled ? "checked" : ""} /><b></b></label>
+    <fieldset class="audio-fieldset"><legend>PERSONALITY</legend><div class="personality-grid">
+      ${Object.entries(AUCTIONEER_PERSONALITIES).map(([id, profile]) => `<label class="personality-option"><input type="radio" name="personality" value="${id}" ${auctioneerProfile.personality === id ? "checked" : ""} /><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.description)}</small></span><i>✓</i></label>`).join("")}
+    </div></fieldset>
+    <fieldset class="audio-fieldset"><legend>ENERGY LEVEL</legend><div class="energy-grid">
+      ${[[1, "Measured", "Calm pacing"], [2, "Draft night", "Balanced"], [3, "Full send", "Maximum lift"]].map(([value, name, copy]) => `<label><input type="radio" name="energy" value="${value}" ${auctioneerProfile.energy === value ? "checked" : ""} /><span><strong>${name}</strong><small>${copy}</small></span></label>`).join("")}
+    </div></fieldset>
+    <div class="audio-preflight"><span><small>ROOM CHECK</small><strong data-audio-check>Make sure every manager can hear the auctioneer.</strong></span><button type="button" data-action="test-audio">${icon("volume")} Can you hear Lucy?</button></div>
+    <div class="audio-cache-note">${icon("database")} Common countdown calls are cached after first playback. If realtime audio stalls, Sun God automatically finishes with a browser voice.</div>
+    <div class="dialog-actions"><button type="button" data-action="close-audio" class="secondary-action">Cancel</button><button type="submit" class="primary-action">Save audio settings</button></div>
+  </form>`;
+}
+
 function visualTieConfirmation() {
   const teams = pendingVisualTie.teamIds
     .map((teamId) => state.teams.find((team) => team.id === teamId))
@@ -377,6 +404,13 @@ function wireGlobalEvents() {
         pendingCsvImport = null;
         return render();
       }
+      if (action === "audio-settings") {
+        document.querySelector("#audio-dialog")?.showModal();
+        void auctioneerVoice.initialize();
+        return;
+      }
+      if (action === "close-audio") { stopAuctioneer(); return document.querySelector("#audio-dialog")?.close(); }
+      if (action === "test-audio") return runAudioPreflight(button);
       if (action === "setup-next") {
         if (!validateSetupStep(setupStep)) return;
         return showSetupStep(Math.min(3, setupStep + 1));
@@ -388,7 +422,6 @@ function wireGlobalEvents() {
       if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (action === "copy-phone-link") return copyPhoneJoinLink();
       if (action === "reset-phone-claims") return resetPhoneClaims();
-      if (action === "voice") { voiceEnabled = !voiceEnabled; if (!voiceEnabled) stopAuctioneer(); render(); return; }
       if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
       if (action === "open") return beginAuction();
       if (action === "pause") { clearTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
@@ -422,6 +455,23 @@ function wireGlobalEvents() {
   });
 
   app.addEventListener("submit", (event) => {
+    if (event.target.id === "audio-form") {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      auctioneerProfile = {
+        enabled: data.get("enabled") === "on",
+        personality: AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic",
+        energy: Math.min(3, Math.max(1, Number(data.get("energy")) || 2))
+      };
+      voiceEnabled = auctioneerProfile.enabled;
+      auctioneerScript = createAuctioneerScript(auctioneerProfile);
+      localStorage.setItem(AUCTIONEER_PROFILE_STORAGE_KEY, JSON.stringify(auctioneerProfile));
+      if (!voiceEnabled) stopAuctioneer();
+      document.querySelector("#audio-dialog")?.close();
+      render();
+      showNotice({ kind: "success", message: `${AUCTIONEER_PERSONALITIES[auctioneerProfile.personality].name} is set to energy level ${auctioneerProfile.energy}.` });
+      return;
+    }
     if (event.target.id === "csv-mapping-form") {
       event.preventDefault();
       const data = new FormData(event.target);
@@ -563,8 +613,42 @@ function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
   auctioneerVoice.speak(text, {
     style,
     priority,
+    personality: auctioneerProfile.personality,
+    energy: auctioneerProfile.energy,
     onDone
   });
+}
+
+function runAudioPreflight(button) {
+  const form = document.querySelector("#audio-form");
+  if (!form) return;
+  const data = new FormData(form);
+  const personality = AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic";
+  const energy = Math.min(3, Math.max(1, Number(data.get("energy")) || 2));
+  const check = form.querySelector("[data-audio-check]");
+  button.disabled = true;
+  if (check) check.textContent = "Lucy is speaking now…";
+  const previewScript = createAuctioneerScript({ personality });
+  auctioneerVoice.speak(previewScript.preflight(), {
+    style: "preflight",
+    priority: SPEECH_PRIORITY.preflight,
+    personality,
+    energy,
+    onDone: () => {
+      if (check?.isConnected) check.textContent = "Audio check complete. Ask the room for a thumbs-up.";
+      if (button?.isConnected) button.disabled = false;
+    }
+  });
+}
+
+function updateAudioServiceStatus() {
+  const dialog = document.querySelector("#audio-dialog");
+  const card = dialog?.querySelector(".audio-provider-card");
+  const label = dialog?.querySelector("[data-audio-provider-label]");
+  const message = dialog?.querySelector("[data-audio-provider-message]");
+  card?.classList.toggle("is-fallback", auctioneerService.provider === "browser");
+  if (label) label.textContent = audioProviderLabel();
+  if (message) message.textContent = auctioneerService.message;
 }
 
 function stopAuctioneer() {
@@ -883,8 +967,15 @@ function qrCodeSvg(text) {
 
 function auctioneerVoiceTitle() {
   if (!voiceEnabled) return "Turn on auctioneer voice";
-  if (auctioneerService.status === "ready" && auctioneerService.available) return `Cartesia ${auctioneerService.model} auctioneer is on`;
-  return "Auctioneer voice is on with browser fallback";
+  const profileName = AUCTIONEER_PERSONALITIES[auctioneerProfile.personality]?.name || "Lucy";
+  if (auctioneerService.status === "ready" && auctioneerService.available) return `${profileName} is on with Cartesia ${auctioneerService.model}`;
+  return `${profileName} is on with browser voice fallback`;
+}
+
+function audioProviderLabel() {
+  if (auctioneerService.provider === "browser" || auctioneerService.available === false) return "BROWSER VOICE FAILOVER ACTIVE";
+  const cached = Number(auctioneerService.countdownCacheEntries) || 0;
+  return `CARTESIA REALTIME · ${cached} COUNTDOWN${cached === 1 ? "" : "S"} CACHED`;
 }
 
 function restoreDraft() {
@@ -899,6 +990,17 @@ function restoreDraft() {
     restored.auction = { nominatorTeamId: null, ...restored.auction };
     return restored;
   } catch { return null; }
+}
+
+function restoreAuctioneerProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AUCTIONEER_PROFILE_STORAGE_KEY));
+    return {
+      enabled: saved?.enabled !== false,
+      personality: AUCTIONEER_PERSONALITIES[saved?.personality] ? saved.personality : "classic",
+      energy: Math.min(3, Math.max(1, Number(saved?.energy) || 2))
+    };
+  } catch { return { enabled: true, personality: "classic", energy: 2 }; }
 }
 
 function normalizedRequirements() {

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 import { PhoneRoomHub } from "./src/phone-room-hub.mjs";
 import { CartesiaSpeechService } from "./src/cartesia-speech-service.mjs";
+import { SpeechAudioCache, countdownCacheKey } from "./src/speech-cache.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
@@ -26,12 +27,13 @@ const mimeTypes = {
 };
 
 const phoneRoomHub = new PhoneRoomHub();
+const speechAudioCache = new SpeechAudioCache();
 
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
     if (request.method === "GET" && url.pathname === "/api/auctioneer/status") {
-      return sendJson(response, 200, cartesiaSpeech.status());
+      return sendJson(response, 200, { ...cartesiaSpeech.status(), countdownCacheEntries: speechAudioCache.size });
     }
     if (request.method === "POST" && url.pathname === "/api/auctioneer/speech") {
       return await streamAuctioneerSpeech(request, response);
@@ -134,6 +136,8 @@ async function streamAuctioneerSpeech(request, response) {
   const payload = await readJsonRequest(request);
   const text = String(payload?.text || "").trim().slice(0, 1_500);
   const style = String(payload?.style || "neutral").trim().slice(0, 30);
+  const personality = ["classic", "hype", "pro"].includes(payload?.personality) ? payload.personality : "classic";
+  const energy = Math.min(3, Math.max(1, Number(payload?.energy) || 2));
   if (!text) throw apiError("Auctioneer speech text is required.", 400);
 
   response.writeHead(200, {
@@ -143,10 +147,29 @@ async function streamAuctioneerSpeech(request, response) {
     "X-Accel-Buffering": "no"
   });
 
+  const cacheKey = countdownCacheKey({
+    text,
+    style,
+    personality,
+    energy,
+    voiceId: cartesiaSpeech.voiceId,
+    model: cartesiaSpeech.model
+  });
+  const cached = cacheKey ? speechAudioCache.get(cacheKey) : null;
+  if (cached) {
+    response.write(`${JSON.stringify({ type: "start", sampleRate: cached.sampleRate, encoding: "pcm_s16le", cached: true })}\n`);
+    for (const event of cached.events) response.write(`${JSON.stringify(event)}\n`);
+    response.write(`${JSON.stringify({ type: "done", cached: true })}\n`);
+    response.end();
+    return;
+  }
+
   let completed = false;
+  let cancelled = false;
   let speech;
+  const audioEvents = [];
   const cancel = () => {
-    if (!completed) speech?.cancel();
+    if (!completed) { cancelled = true; speech?.cancel(); }
   };
   request.once("aborted", cancel);
   response.once("close", cancel);
@@ -155,13 +178,17 @@ async function streamAuctioneerSpeech(request, response) {
     speech = await cartesiaSpeech.createSpeech({
       transcript: text,
       style,
+      personality,
+      energy,
       onEvent: (event) => {
+        if (event.type === "audio" && event.data) audioEvents.push({ type: "audio", data: event.data });
         if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
       }
     });
     response.write(`${JSON.stringify({ type: "start", contextId: speech.contextId, sampleRate: speech.sampleRate, encoding: "pcm_s16le" })}\n`);
     await speech.done;
     completed = true;
+    if (cacheKey && !cancelled && audioEvents.length) speechAudioCache.set(cacheKey, { sampleRate: speech.sampleRate, events: audioEvents });
     if (!response.destroyed && !response.writableEnded) {
       response.write(`${JSON.stringify({ type: "done" })}\n`);
       response.end();
