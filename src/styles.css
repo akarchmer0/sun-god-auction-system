@@ -250,12 +250,20 @@ button { color: inherit; }
 .keyboard-hint span { padding: 0 6px; }
 
 .ledger-panel { grid-area: ledger; min-height: 240px; }
+.ledger-tools { display: flex; align-items: center; gap: 12px; }
 .sales-list { border-top: 1px solid var(--line); }
 .sale-row { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 9px; padding: 11px 18px; border-bottom: 1px solid #2b2b27; }
 .sale-row strong, .sale-row small { display: block; }
 .sale-row strong { font-size: 10px; }
 .sale-row small { color: #686861; margin-top: 3px; font-size: 8px; }
 .sale-row b { color: #bbb9b1; font: 500 10px/1 "DM Mono", monospace; }
+.draft-results-button { width: calc(100% - 36px); min-height: 58px; margin: 16px 18px 18px; display: grid; grid-template-columns: 18px minmax(0,1fr) 14px; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 10px 11px; background: var(--paper); color: #f6eedc; text-align: left; cursor: pointer; box-shadow: 4px 4px 0 var(--orange); }
+.draft-results-button:hover { transform: translate(-1px,-1px); box-shadow: 6px 6px 0 var(--orange); }
+.draft-results-button .icon { width: 16px; color: #f3c45e; }
+.draft-results-button .icon-arrow { width: 13px; color: #f6eedc; }
+.draft-results-button strong,.draft-results-button small { display: block; }
+.draft-results-button strong { font-size: 9px; }
+.draft-results-button small { margin-top: 5px; color: #c7bda9; font: 500 7px/1 "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
 
 dialog { width: min(680px, 92vw); padding: 0; border: 1px solid #3b3b36; border-radius: 10px; background: #1d1d1a; color: var(--paper); box-shadow: 0 30px 90px rgba(0,0,0,.7); }
 dialog::backdrop { background: rgba(5,5,4,.7); backdrop-filter: blur(4px); }
@@ -294,6 +302,20 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 .dialog-actions .setup-cancel { margin-right: auto; }
 .dialog-actions [hidden] { display: none; }
+.csv-mapping-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+.csv-mapping-grid label { color: #554d41; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.csv-mapping-grid label span { display: block; margin-bottom: 7px; }
+.csv-mapping-grid select { width: 100%; height: 39px; border: 1px solid var(--line); border-radius: 5px; padding: 0 9px; background: #fff9ed; color: var(--paper); outline: 0; }
+.csv-mapping-grid select:focus { border-color: var(--orange); }
+.csv-preview-wrap { margin-top: 18px; overflow: auto; border: 1px solid var(--line); background: #fff9ed; }
+.csv-preview-wrap > span { display: block; padding: 8px 10px; border-bottom: 1px solid var(--line); color: #655b4d; font: 700 7px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.csv-preview-wrap table { width: 100%; border-collapse: collapse; font: 500 8px/1.35 "DM Mono", monospace; white-space: nowrap; }
+.csv-preview-wrap th,.csv-preview-wrap td { max-width: 160px; overflow: hidden; padding: 7px 10px; border-right: 1px solid #cdbfa3; border-bottom: 1px solid #d8cbae; text-align: left; text-overflow: ellipsis; }
+.csv-preview-wrap th { background: #e8d8b8; font-weight: 700; }
+.csv-preview-wrap tr:last-child td { border-bottom: 0; }
+.import-warning { margin-top: 13px; border-left: 3px solid #8c5b00; padding: 8px 10px; background: #eadcc0; color: #51483a; font-size: 9px; line-height: 1.45; }
+.csv-form-error { margin-top: 9px; border: 1px solid #6f2119; border-radius: 4px; padding: 8px 10px; background: #f1d7cc; color: #571711; font-size: 9px; }
+.csv-form-error[hidden] { display: none; }
 
 .visual-tie-confirmation { position: fixed; z-index: 44; top: 83px; left: 50%; width: min(880px, calc(100vw - 40px)); transform: translateX(-50%); display: grid; grid-template-columns: auto minmax(160px, 1fr) auto; align-items: center; gap: 16px; padding: 13px 15px; border: 1px solid #8a6138; border-radius: 9px; background: #282116; box-shadow: 0 18px 55px rgba(0,0,0,.55); }
 .visual-tie-confirmation > div:first-child { display: flex; align-items: center; gap: 10px; }

@@ -4,6 +4,13 @@ import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { createAuctioneerScript } from "./auctioneer-script.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import {
+  parseCsv,
+  suggestCsvMapping,
+  playersFromMappedCsv,
+  buildResultsPayload,
+  encodeResultsPayload
+} from "./draft-io.mjs";
+import {
   VISUAL_BID_WINDOW_MS,
   bidsShareWindow,
   nextVisualBidAmount
@@ -41,6 +48,7 @@ let state = restoreDraft() || createDraft({
 let voiceEnabled = true;
 let autoEnabled = true;
 let setupStep = 1;
+let pendingCsvImport = null;
 let countdownTimer = null;
 let notice = null;
 let pendingVisualTie = null;
@@ -186,15 +194,17 @@ function render() {
         <aside class="ledger-panel panel">
           <div class="panel-heading">
             <div><span class="eyebrow">DRAFT LEDGER</span><h2>Recent sales</h2></div>
-            <button class="text-button" data-action="undo" ${state.sales.length ? "" : "disabled"}>Undo last</button>
+            <div class="ledger-tools"><button class="text-button" data-action="results">Results</button><button class="text-button" data-action="undo" ${state.sales.length ? "" : "disabled"}>Undo last</button></div>
           </div>
           <div class="sales-list">
             ${state.sales.length ? [...state.sales].reverse().slice(0, 5).map(saleRow).join("") : `<p class="empty-copy">Every completed sale will appear here.</p>`}
           </div>
+          <button class="draft-results-button" data-action="results">${icon("trophy")}<span><strong>View & export results</strong><small>Summary · CSV · ESPN · Yahoo · Sleeper</small></span>${icon("arrow")}</button>
         </aside>
       </main>
     </div>
     <dialog id="setup-dialog">${setupDialog()}</dialog>
+    <dialog id="csv-mapping-dialog">${pendingCsvImport ? csvMappingDialog() : ""}</dialog>
   `;
 }
 
@@ -309,6 +319,33 @@ function setupDialog() {
   </form>`;
 }
 
+function csvMappingDialog() {
+  const { fileName, headers, rows, mapping } = pendingCsvImport;
+  const fields = [
+    ["name", "Player name", true],
+    ["position", "Position", true],
+    ["team", "NFL team", false],
+    ["value", "Suggested value", false]
+  ];
+  const previewHeaders = headers.slice(0, 6);
+  return `<form id="csv-mapping-form" method="dialog">
+    <div class="dialog-head"><div><span class="eyebrow">PLAYER CSV IMPORT</span><h2>Map your columns</h2></div><button type="button" data-action="close-import" class="dialog-close" aria-label="Close">×</button></div>
+    <p><strong>${escapeHtml(fileName)}</strong> contains ${rows.length} data row${rows.length === 1 ? "" : "s"}. Match its headings before resetting the current draft.</p>
+    <div class="csv-mapping-grid">
+      ${fields.map(([field, label, required]) => `<label><span>${label}${required ? " *" : ""}</span><select name="map_${field}" ${required ? "required" : ""}>
+        <option value="">${required ? "Choose a column" : "Do not import"}</option>
+        ${headers.map((header, index) => `<option value="${index}" ${mapping[field] === index ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}
+      </select></label>`).join("")}
+    </div>
+    <div class="csv-preview-wrap"><span>FILE PREVIEW</span><table><thead><tr>${previewHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>
+      ${rows.slice(0, 3).map((row) => `<tr>${previewHeaders.map((_, index) => `<td>${escapeHtml(row[index] || "")}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>
+    <div class="import-warning">Importing replaces the player pool and clears every sale and roster. League rules and nomination order stay intact.</div>
+    <div class="csv-form-error" role="alert" hidden></div>
+    <div class="dialog-actions"><button type="button" data-action="close-import" class="secondary-action">Cancel</button><button type="submit" class="primary-action">Import players & reset</button></div>
+  </form>`;
+}
+
 function visualTieConfirmation() {
   const teams = pendingVisualTie.teamIds
     .map((teamId) => state.teams.find((team) => team.id === teamId))
@@ -336,6 +373,10 @@ function wireGlobalEvents() {
         return document.querySelector("#setup-dialog")?.showModal();
       }
       if (action === "close-setup") return document.querySelector("#setup-dialog")?.close();
+      if (action === "close-import") {
+        pendingCsvImport = null;
+        return render();
+      }
       if (action === "setup-next") {
         if (!validateSetupStep(setupStep)) return;
         return showSetupStep(Math.min(3, setupStep + 1));
@@ -355,6 +396,7 @@ function wireGlobalEvents() {
       if (action === "next") return update(moveToNextPlayer(state));
       if (action === "bid") return submitBid(button.dataset.teamId);
       if (action === "undo") { clearTimer(); return update(undoLastSale(state), "Last sale reversed."); }
+      if (action === "results") return await openResultsPage();
       if (action === "load-fantasy-pros") return loadFantasyProsPreset();
       if (action === "import") return document.querySelector("#csv-input")?.click();
     } catch (error) {
@@ -368,7 +410,10 @@ function wireGlobalEvents() {
       if (autoEnabled && ["open", "once", "twice"].includes(state.auction.phase)) scheduleCountdown();
       else clearTimer();
     }
-    if (event.target.id === "csv-input") importCsv(event.target.files?.[0]);
+    if (event.target.id === "csv-input") {
+      void importCsv(event.target.files?.[0]);
+      event.target.value = "";
+    }
   });
 
   app.addEventListener("input", (event) => {
@@ -377,6 +422,38 @@ function wireGlobalEvents() {
   });
 
   app.addEventListener("submit", (event) => {
+    if (event.target.id === "csv-mapping-form") {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      try {
+        const mapping = Object.fromEntries(["name", "position", "team", "value"].map((field) => {
+          const value = data.get(`map_${field}`);
+          return [field, value === "" ? -1 : Number(value)];
+        }));
+        const imported = playersFromMappedCsv(pendingCsvImport?.rows || [], mapping);
+        clearTimer();
+        stopAuctioneer();
+        clearVisualBidWindow();
+        pendingVisualTie = null;
+        pendingCsvImport = null;
+        state = createDraft({
+          players: imported,
+          teams: state.teams.map((team) => ({ ...team, roster: [] })),
+          budget: state.config.budget,
+          rosterSize: state.config.rosterSize,
+          increment: state.config.increment,
+          rosterRequirements: normalizedRequirements(),
+          nominationOrder: state.nomination?.order
+        });
+        persistDraft();
+        render();
+        showNotice({ kind: "success", message: `Imported ${imported.length} players and reset the draft.` });
+      } catch (error) {
+        const errorNode = event.target.querySelector(".csv-form-error");
+        if (errorNode) { errorNode.textContent = error.message; errorNode.hidden = false; }
+      }
+      return;
+    }
     if (event.target.id !== "setup-form") return;
     event.preventDefault();
     const data = new FormData(event.target);
@@ -727,35 +804,22 @@ async function importCsv(file) {
   if (!file) return;
   try {
     const text = await file.text();
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    const header = lines.shift().split(",").map((item) => item.trim().toLowerCase());
-    const column = (name) => header.indexOf(name);
-    if (column("name") < 0 || column("position") < 0) throw new Error("CSV needs name and position columns.");
-    const imported = lines.map((line, index) => {
-      const cells = line.split(",").map((item) => item.trim().replace(/^"|"$/g, ""));
-      const name = cells[column("name")];
-      return {
-        id: `import-${slug(name)}-${index}`,
-        name,
-        position: cells[column("position")]?.toUpperCase() || "FLEX",
-        nflTeam: cells[column("team")]?.toUpperCase() || "FA",
-        suggestedValue: Number(cells[column("value")]) || 1,
-        status: "available"
-      };
-    }).filter((player) => player.name);
-    state = createDraft({
-      players: imported,
-      teams: state.teams.map((team) => ({ ...team, roster: [] })),
-      budget: state.config.budget,
-      rosterSize: state.config.rosterSize,
-      increment: state.config.increment,
-      rosterRequirements: normalizedRequirements(),
-      nominationOrder: state.nomination?.order
-    });
-    persistDraft();
+    const parsed = parseCsv(text);
+    pendingCsvImport = {
+      fileName: file.name || "players.csv",
+      headers: parsed.headers,
+      rows: parsed.rows,
+      mapping: suggestCsvMapping(parsed.headers)
+    };
     render();
-    showNotice({ kind: "success", message: `Imported ${imported.length} players and reset the draft.` });
+    document.querySelector("#csv-mapping-dialog")?.showModal();
   } catch (error) { showNotice({ kind: "error", message: error.message }); }
+}
+
+async function openResultsPage() {
+  const payload = buildResultsPayload(state);
+  const encoded = await encodeResultsPayload(payload);
+  window.location.assign(`./results.html#${encoded}`);
 }
 
 function loadFantasyProsPreset() {
@@ -873,10 +937,6 @@ function phaseLabel(phase) {
   return ({ idle: "Room ready", ready: "Player nominated", open: "Bidding live", once: "Going once", twice: "Going twice", paused: "Auction paused", sold: "Player sold", passed: "No sale" })[phase] || phase;
 }
 
-function slug(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-}
-
 function createRoomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -907,6 +967,7 @@ function icon(name) {
     print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/>',
     expand: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 6-6m12 6-6-6M3 16l6 6m12-6-6 6"/>',
     cards: '<rect x="3" y="4" width="14" height="16" rx="2"/><path d="m17 7 3 .7a2 2 0 0 1 1.5 2.4l-2 8a2 2 0 0 1-2.4 1.5"/><path d="M7 9h6M7 13h6"/>',
+    trophy: '<path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 6H4v1a4 4 0 0 0 4 4M16 6h4v1a4 4 0 0 1-4 4M12 12v5M8 21h8M9 17h6"/>',
     database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
   };
   return `<svg class="icon icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;

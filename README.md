@@ -71,7 +71,7 @@ Number keys 1–9 place quick bids. Space advances the countdown manually.
 
 The **Load FantasyPros values** button on the player board replaces the current draft with the supplied 315-player FantasyPros auction list in a single click. It preserves the league's teams, budget, roster size, and bid increment while clearing sales and rosters for a fresh draft. Because the supplied list does not include NFL-team abbreviations, those players display `FA`; positions are included for draft filtering and display.
 
-Importing a CSV resets the draft. Required columns are `name` and `position`; optional columns are `team` and `value`.
+Importing a CSV opens a column-mapping preview before it resets the draft. Map player name and position, then optionally map NFL team and suggested auction value. Common headings such as `Player Name`, `Athlete`, `Pos`, `Pro Team`, and `Auction Value` are matched automatically, while quoted names and values containing commas are supported.
 
 ```csv
 name,position,team,value
@@ -80,6 +80,12 @@ Bijan Robinson,RB,ATL,55
 ```
 
 The default player board is demo data. The built-in FantasyPros preset reflects the supplied snapshot and does not fetch or silently update values from the internet.
+
+## Results and exports
+
+Open **View & export results** in the draft ledger for a post-draft report with league totals, top sale, best value versus suggested price, team spending, and final rosters. The report URL contains a compressed snapshot of the results, so copying the share link preserves that exact draft even if the commissioner later changes local state.
+
+The results page can download a universal CSV or copy tab-separated tables arranged for ESPN, Yahoo, or Sleeper. These copy formats are designed for clean transfer into league tools or spreadsheets; each platform may still require its own commissioner-side import or roster-assignment workflow.
 
 ## Architecture notes
 
