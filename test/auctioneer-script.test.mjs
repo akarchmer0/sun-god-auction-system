@@ -31,3 +31,16 @@ test("auctioneer personalities change the room voice and include preflight", () 
   assert.match(classic.preflight(), /Can you hear Lucy/i);
   assert.match(hype.preflight(), /draft room/i);
 });
+
+test("continuous patter tracks the player, leader, price, and next bid", () => {
+  const script = createAuctioneerScript({ personality: "hype" });
+  const player = { name: "Puka Nacua", position: "WR", nflTeam: "LAR" };
+  const opening = script.patter({ player, amount: 0, manager: null, nextAmount: 1, phase: "open", suggestedValue: 41 });
+  const active = script.patter({ player, amount: 35, manager: "Alex", nextAmount: 36, phase: "open", suggestedValue: 41 });
+  const urgent = script.patter({ player, amount: 35, manager: "Alex", nextAmount: 36, phase: "twice", suggestedValue: 41 });
+  assert.match(opening, /Puka Nacua|WR/);
+  assert.match(active, /Alex|Puka Nacua/);
+  assert.match(active, /35/);
+  assert.match(active, /36/);
+  assert.notEqual(active, urgent);
+});

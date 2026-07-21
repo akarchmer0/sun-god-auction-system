@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 import { PhoneRoomHub } from "./src/phone-room-hub.mjs";
 import { CartesiaSpeechService } from "./src/cartesia-speech-service.mjs";
+import { ElevenLabsSpeechService } from "./src/elevenlabs-speech-service.mjs";
+import { speechProviderCandidates, speechProviderStatus } from "./src/auctioneer-speech-providers.mjs";
 import { SpeechAudioCache, countdownCacheKey } from "./src/speech-cache.mjs";
+import { OpenAIRoastService } from "./src/openai-roast-service.mjs";
+import { OpenAIPatterService } from "./src/openai-patter-service.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
@@ -15,6 +19,20 @@ const cartesiaSpeech = new CartesiaSpeechService({
   apiKey: process.env.CARTESIA_API_KEY,
   voiceId: process.env.CARTESIA_VOICE_ID,
   model: process.env.CARTESIA_MODEL
+});
+const elevenLabsSpeech = new ElevenLabsSpeechService({
+  apiKey: process.env.ELEVENLABS_API_KEY,
+  voiceId: process.env.ELEVENLABS_VOICE_ID,
+  model: process.env.ELEVENLABS_MODEL
+});
+const speechProviders = { elevenlabs: elevenLabsSpeech, cartesia: cartesiaSpeech };
+const roastWriter = new OpenAIRoastService({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: process.env.OPENAI_ROAST_MODEL
+});
+const patterDirector = new OpenAIPatterService({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: process.env.OPENAI_PATTER_MODEL
 });
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -33,10 +51,36 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
     if (request.method === "GET" && url.pathname === "/api/auctioneer/status") {
-      return sendJson(response, 200, { ...cartesiaSpeech.status(), countdownCacheEntries: speechAudioCache.size });
+      const providers = Object.fromEntries(Object.entries(speechProviders).map(([id, service]) => [id, service.status()]));
+      return sendJson(response, 200, {
+        ...speechProviderStatus("auto", providers),
+        providers,
+        countdownCacheEntries: speechAudioCache.size,
+        roasting: roastWriter.status(),
+        patter: patterDirector.status()
+      });
     }
     if (request.method === "POST" && url.pathname === "/api/auctioneer/speech") {
       return await streamAuctioneerSpeech(request, response);
+    }
+    if (request.method === "POST" && url.pathname === "/api/auctioneer/roast") {
+      const payload = await readJsonRequest(request);
+      const roast = await roastWriter.createRoast({
+        context: payload?.context,
+        recentRoasts: payload?.recentRoasts,
+        personality: ["classic", "hype", "pro"].includes(payload?.personality) ? payload.personality : "classic"
+      });
+      return sendJson(response, 200, roast);
+    }
+    if (request.method === "POST" && url.pathname === "/api/auctioneer/patter") {
+      const payload = await readJsonRequest(request);
+      const patter = await patterDirector.createPatter({
+        context: payload?.context,
+        recentLines: payload?.recentLines,
+        personality: ["classic", "hype", "pro"].includes(payload?.personality) ? payload.personality : "classic",
+        energy: Math.min(3, Math.max(1, Number(payload?.energy) || 2))
+      });
+      return sendJson(response, 200, patter);
     }
     if (request.method === "GET" && url.pathname === "/api/phone-room") {
       const room = phoneRoomHub.snapshot(url.searchParams.get("room"));
@@ -76,13 +120,14 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, "::", () => {
   console.log(`Sun God Auction Systems is running at http://localhost:${port}`);
-  if (cartesiaSpeech.status().available) {
-    cartesiaSpeech.warm()
-      .then(() => console.log(`Cartesia auctioneer is ready (${cartesiaSpeech.model}).`))
-      .catch((error) => console.warn(`[Cartesia] ${cleanError(error)}`));
-  } else {
-    console.log("Cartesia auctioneer is not configured; browser voice fallback is active.");
+  for (const [name, service] of Object.entries(speechProviders)) {
+    if (service.status().available) {
+      service.warm()
+        .then(() => console.log(`${name === "elevenlabs" ? "ElevenLabs" : "Cartesia"} auctioneer is ready (${service.model}).`))
+        .catch((error) => console.warn(`[${name}] ${cleanError(error)}`));
+    }
   }
+  if (!Object.values(speechProviders).some((service) => service.status().available)) console.log("No realtime auctioneer is configured; browser voice fallback is active.");
 });
 
 async function serveStatic(pathname, response, isHead) {
@@ -132,8 +177,13 @@ async function readJsonRequest(request) {
 }
 
 async function streamAuctioneerSpeech(request, response) {
-  if (!cartesiaSpeech.status().available) throw apiError(cartesiaSpeech.status().message, 503);
   const payload = await readJsonRequest(request);
+  const requestedProvider = ["auto", "elevenlabs", "cartesia"].includes(payload?.provider) ? payload.provider : "auto";
+  const speechCandidates = speechProviderCandidates(requestedProvider, speechProviders);
+  if (!speechCandidates.length) {
+    const statuses = Object.fromEntries(Object.entries(speechProviders).map(([id, service]) => [id, service.status()]));
+    throw apiError(speechProviderStatus(requestedProvider, statuses).message, 503);
+  }
   const text = String(payload?.text || "").trim().slice(0, 1_500);
   const style = String(payload?.style || "neutral").trim().slice(0, 30);
   const personality = ["classic", "hype", "pro"].includes(payload?.personality) ? payload.personality : "classic";
@@ -147,26 +197,23 @@ async function streamAuctioneerSpeech(request, response) {
     "X-Accel-Buffering": "no"
   });
 
-  const cacheKey = countdownCacheKey({
-    text,
-    style,
-    personality,
-    energy,
-    voiceId: cartesiaSpeech.voiceId,
-    model: cartesiaSpeech.model
-  });
-  const cached = cacheKey ? speechAudioCache.get(cacheKey) : null;
-  if (cached) {
-    response.write(`${JSON.stringify({ type: "start", sampleRate: cached.sampleRate, encoding: "pcm_s16le", cached: true })}\n`);
-    for (const event of cached.events) response.write(`${JSON.stringify(event)}\n`);
-    response.write(`${JSON.stringify({ type: "done", cached: true })}\n`);
-    response.end();
-    return;
+  for (const candidate of speechCandidates) {
+    const candidateCacheKey = speechCacheKey(candidate, { text, style, personality, energy });
+    const cached = candidateCacheKey ? speechAudioCache.get(candidateCacheKey) : null;
+    if (cached) {
+      response.write(`${JSON.stringify({ type: "start", provider: candidate.status().provider, sampleRate: cached.sampleRate, encoding: "pcm_s16le", cached: true })}\n`);
+      for (const event of cached.events) response.write(`${JSON.stringify(event)}\n`);
+      response.write(`${JSON.stringify({ type: "done", cached: true })}\n`);
+      response.end();
+      return;
+    }
   }
 
   let completed = false;
   let cancelled = false;
   let speech;
+  let speechService;
+  let cacheKey;
   const audioEvents = [];
   const cancel = () => {
     if (!completed) { cancelled = true; speech?.cancel(); }
@@ -175,17 +222,29 @@ async function streamAuctioneerSpeech(request, response) {
   response.once("close", cancel);
 
   try {
-    speech = await cartesiaSpeech.createSpeech({
-      transcript: text,
-      style,
-      personality,
-      energy,
-      onEvent: (event) => {
-        if (event.type === "audio" && event.data) audioEvents.push({ type: "audio", data: event.data });
-        if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+    let lastError;
+    for (const candidate of speechCandidates) {
+      try {
+        speech = await candidate.createSpeech({
+          transcript: text,
+          style,
+          personality,
+          energy,
+          onEvent: (event) => {
+            if (event.type === "audio" && event.data) audioEvents.push({ type: "audio", data: event.data });
+            if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+          }
+        });
+        speechService = candidate;
+        cacheKey = speechCacheKey(candidate, { text, style, personality, energy });
+        break;
+      } catch (error) {
+        lastError = error;
+        if (requestedProvider !== "auto") throw error;
       }
-    });
-    response.write(`${JSON.stringify({ type: "start", contextId: speech.contextId, sampleRate: speech.sampleRate, encoding: "pcm_s16le" })}\n`);
+    }
+    if (!speech || !speechService) throw lastError || apiError("No realtime voice provider could start speech.", 503);
+    response.write(`${JSON.stringify({ type: "start", provider: speechService.status().provider, contextId: speech.contextId, sampleRate: speech.sampleRate, encoding: "pcm_s16le" })}\n`);
     await speech.done;
     completed = true;
     if (cacheKey && !cancelled && audioEvents.length) speechAudioCache.set(cacheKey, { sampleRate: speech.sampleRate, events: audioEvents });
@@ -203,6 +262,14 @@ async function streamAuctioneerSpeech(request, response) {
     request.off("aborted", cancel);
     response.off("close", cancel);
   }
+}
+
+function speechCacheKey(service, performance) {
+  return countdownCacheKey({
+    ...performance,
+    voiceId: service.voiceId,
+    model: `${service.status().provider}:${service.model}`
+  });
 }
 
 function openPhoneRoomEvents(request, response, roomId) {
@@ -272,7 +339,7 @@ function loadLocalEnv(directory) {
   try { source = readFileSync(envPath, "utf8"); }
   catch (error) { if (error?.code !== "ENOENT") console.warn("Could not read Sun God's .env file."); return; }
   for (const line of source.split(/\r?\n/)) {
-    const match = line.match(/^\s*(?:export\s+)?(CARTESIA_API_KEY|CARTESIA_VOICE_ID|CARTESIA_MODEL)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^\s*(?:export\s+)?(CARTESIA_API_KEY|CARTESIA_VOICE_ID|CARTESIA_MODEL|ELEVENLABS_API_KEY|ELEVENLABS_VOICE_ID|ELEVENLABS_MODEL|OPENAI_API_KEY|OPENAI_ROAST_MODEL|OPENAI_PATTER_MODEL)\s*=\s*(.*?)\s*$/);
     if (!match || process.env[match[1]]) continue;
     const value = match[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2").trim();
     if (value) process.env[match[1]] = value;
@@ -304,6 +371,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     if (isShuttingDown) return;
     isShuttingDown = true;
     cartesiaSpeech.close();
+    elevenLabsSpeech.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 400).unref();
   });

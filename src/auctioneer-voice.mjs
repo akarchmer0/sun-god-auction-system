@@ -1,3 +1,5 @@
+import { SPEECH_PROVIDER_IDS, speechProviderStatus } from "./auctioneer-speech-providers.mjs";
+
 export class AuctioneerVoice {
   constructor({
     endpoint = "/api/auctioneer/speech",
@@ -6,6 +8,7 @@ export class AuctioneerVoice {
     AudioContextImpl = globalThis.AudioContext || globalThis.webkitAudioContext,
     speechSynthesisImpl = globalThis.speechSynthesis,
     UtteranceImpl = globalThis.SpeechSynthesisUtterance,
+    provider = "auto",
     streamTimeoutMs = 4_500,
     onStatusChange = () => {}
   } = {}) {
@@ -15,23 +18,31 @@ export class AuctioneerVoice {
     this.AudioContextImpl = AudioContextImpl;
     this.speechSynthesis = speechSynthesisImpl;
     this.UtteranceImpl = UtteranceImpl;
+    this.providerPreference = SPEECH_PROVIDER_IDS.includes(provider) ? provider : "auto";
     this.streamTimeoutMs = streamTimeoutMs;
     this.onStatusChange = onStatusChange;
     this.audioContext = null;
     this.active = null;
-    this.status = { status: "checking", available: null, provider: "cartesia", message: "Checking Cartesia voice." };
+    this.status = { status: "checking", available: null, provider: "browser", requestedProvider: this.providerPreference, message: "Checking realtime voice providers." };
   }
 
-  async initialize() {
+  async initialize(provider = this.providerPreference) {
+    this.providerPreference = SPEECH_PROVIDER_IDS.includes(provider) ? provider : "auto";
     try {
       const response = await this.fetchImpl(this.statusEndpoint);
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Cartesia status is unavailable.");
-      this.#setStatus({ ...payload, status: payload.available ? "ready" : "fallback" });
+      if (!response.ok) throw new Error(payload.error || "Realtime voice status is unavailable.");
+      const resolved = speechProviderStatus(this.providerPreference, payload.providers || {});
+      this.#setStatus({ ...payload, ...resolved, status: resolved.available ? "ready" : "fallback" });
     } catch (error) {
-      this.#setStatus({ status: "fallback", available: false, provider: "browser", message: error.message });
+      this.#setStatus({ status: "fallback", available: false, provider: "browser", requestedProvider: this.providerPreference, message: `${error.message} Browser voice fallback is active.` });
     }
     return this.status;
+  }
+
+  setProvider(provider) {
+    this.providerPreference = SPEECH_PROVIDER_IDS.includes(provider) ? provider : "auto";
+    return this.initialize();
   }
 
   get isSpeaking() {
@@ -59,7 +70,7 @@ export class AuctioneerVoice {
       this.#speakWithBrowser(transcript, active, { style, personality, energy });
       return;
     }
-    void this.#streamCartesia(transcript, { style, personality, energy }, active);
+    void this.#streamRealtime(transcript, { style, personality, energy }, active);
   }
 
   cancel() {
@@ -78,17 +89,17 @@ export class AuctioneerVoice {
     this.speechSynthesis?.cancel();
   }
 
-  async #streamCartesia(transcript, performance, active) {
+  async #streamRealtime(transcript, performance, active) {
     try {
       const response = await withTimeout(this.fetchImpl(this.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: transcript, ...performance }),
+        body: JSON.stringify({ text: transcript, provider: this.providerPreference, ...performance }),
         signal: active.abortController.signal
       }), this.streamTimeoutMs, () => active.abortController.abort());
       if (!response.ok || !response.body) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "Cartesia speech is unavailable.");
+        throw new Error(payload.error || "Realtime speech is unavailable.");
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -108,7 +119,7 @@ export class AuctioneerVoice {
       this.#finishWhenAudioEnds(active);
     } catch (error) {
       if (error?.name === "AbortError" || this.active !== active) return;
-      this.#setStatus({ status: "fallback", available: false, provider: "browser", message: `${error.message} Browser voice fallback is active.` });
+      this.#setStatus({ status: "fallback", available: false, provider: "browser", requestedProvider: this.providerPreference, message: `${error.message} Browser voice fallback is active.` });
       if (!active.playedAudio) this.#speakWithBrowser(transcript, active, performance);
       else this.#finish(active);
     }
@@ -118,13 +129,14 @@ export class AuctioneerVoice {
     if (this.active !== active) return;
     if (event.type === "start") {
       active.sampleRate = Number(event.sampleRate) || 24_000;
+      if (event.provider && this.status.provider !== event.provider) this.#setStatus({ status: "ready", available: true, provider: event.provider });
       return;
     }
     if (event.type === "audio" && event.data) {
       this.#schedulePcm(event.data, active.sampleRate || 24_000, active);
       return;
     }
-    if (event.type === "error") throw new Error(event.message || "Cartesia speech failed.");
+    if (event.type === "error") throw new Error(event.message || "Realtime speech failed.");
     if (event.type === "done") {
       active.streamDone = true;
       this.#finishWhenAudioEnds(active);
@@ -165,7 +177,7 @@ export class AuctioneerVoice {
     const utterance = new this.UtteranceImpl(transcript);
     const level = Math.min(3, Math.max(1, Number(energy) || 2));
     const personalityRate = ({ classic: 0, hype: 0.08, pro: 0.05 })[personality] || 0;
-    const styleRate = style === "countdown" ? -0.04 : style === "bid" ? 0.04 : 0;
+    const styleRate = style === "countdown" ? -0.04 : ["bid", "patter"].includes(style) ? 0.06 : style === "roast" ? -0.02 : 0;
     utterance.rate = Number((1.03 + (level - 2) * 0.08 + personalityRate + styleRate).toFixed(2));
     utterance.pitch = personality === "hype" ? 1.04 : personality === "pro" ? 0.94 : 1;
     const voices = this.speechSynthesis.getVoices();
@@ -196,7 +208,7 @@ function withTimeout(promise, timeoutMs, onTimeout) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => {
       onTimeout?.();
-      const error = new Error("Cartesia did not respond in time.");
+      const error = new Error("The realtime voice did not respond in time.");
       error.name = "TimeoutError";
       reject(error);
     }, timeoutMs);

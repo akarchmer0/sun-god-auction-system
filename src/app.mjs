@@ -2,6 +2,7 @@ import { seedPlayers, makeTeams } from "./data.mjs";
 import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { createAuctioneerScript, AUCTIONEER_PERSONALITIES } from "./auctioneer-script.mjs";
+import { isLiveAuctionPhase, patterDelayMs } from "./auctioneer-patter.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import {
   parseCsv,
@@ -36,7 +37,7 @@ const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const AUCTIONEER_PROFILE_STORAGE_KEY = "sun-god-auctioneer-profile-v1";
 const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
-const SPEECH_PRIORITY = { nomination: 30, countdown: 50, bid: 100, sold: 110, ruling: 120, preflight: 130 };
+const SPEECH_PRIORITY = { patter: 20, nomination: 30, countdown: 50, bid: 100, roast: 105, sold: 110, ruling: 120, preflight: 130 };
 const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
 let state = restoreDraft() || createDraft({
@@ -48,10 +49,18 @@ let state = restoreDraft() || createDraft({
 });
 let auctioneerProfile = restoreAuctioneerProfile();
 let voiceEnabled = auctioneerProfile.enabled;
+let recentRoasts = [];
 let autoEnabled = true;
 let setupStep = 1;
 let pendingCsvImport = null;
 let countdownTimer = null;
+let patterTimer = null;
+let patterSequence = 0;
+let patterQueue = [];
+let patterQueueKey = "";
+let patterRequest = null;
+let patterRequestSequence = 0;
+let recentPatterLines = [];
 let notice = null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
@@ -68,17 +77,22 @@ let phoneRoom = {
 let auctioneerService = {
   status: "checking",
   available: null,
-  provider: "cartesia",
+  provider: "browser",
+  requestedProvider: auctioneerProfile.provider,
+  providers: {},
   model: null,
   voiceId: null,
   message: "Checking Cartesia's realtime auctioneer."
 };
 let auctioneerScript = createAuctioneerScript(auctioneerProfile);
 const auctioneerVoice = new AuctioneerVoice({
+  provider: auctioneerProfile.provider,
   onStatusChange: (snapshot) => {
     const changed = snapshot.status !== auctioneerService.status
       || snapshot.available !== auctioneerService.available
-      || snapshot.message !== auctioneerService.message;
+      || snapshot.message !== auctioneerService.message
+      || snapshot.patter?.message !== auctioneerService.patter?.message
+      || snapshot.roasting?.message !== auctioneerService.roasting?.message;
     auctioneerService = snapshot;
     if (changed) {
       if (document.querySelector("#audio-dialog")?.open) updateAudioServiceStatus();
@@ -88,7 +102,7 @@ const auctioneerVoice = new AuctioneerVoice({
 });
 render();
 wireGlobalEvents();
-void auctioneerVoice.initialize();
+void auctioneerVoice.initialize(auctioneerProfile.provider);
 void initializePhoneRoom();
 
 function render() {
@@ -353,6 +367,11 @@ function csvMappingDialog() {
 }
 
 function audioDialog() {
+  const providerOptions = [
+    ["auto", "Auto", "ElevenLabs first, then Cartesia"],
+    ["elevenlabs", "ElevenLabs", providerOptionCopy("elevenlabs")],
+    ["cartesia", "Cartesia Lucy", providerOptionCopy("cartesia")]
+  ];
   return `<form id="audio-form" method="dialog">
     <div class="dialog-head"><div><span class="eyebrow">AUCTIONEER AUDIO</span><h2>Lucy’s booth</h2></div><button type="button" data-action="close-audio" class="dialog-close" aria-label="Close">×</button></div>
     <div class="audio-provider-card ${auctioneerService.provider === "browser" ? "is-fallback" : ""}">
@@ -360,7 +379,15 @@ function audioDialog() {
       <span><small data-audio-provider-label>${escapeHtml(audioProviderLabel())}</small><strong data-audio-provider-message>${escapeHtml(auctioneerService.message)}</strong></span>
       <i></i>
     </div>
+    <fieldset class="audio-fieldset provider-fieldset"><legend>VOICE PROVIDER</legend><div class="provider-grid">
+      ${providerOptions.map(([id, name, copy]) => {
+        const unavailable = id !== "auto" && auctioneerService.providers?.[id]?.available === false;
+        return `<label class="provider-option ${unavailable ? "is-unavailable" : ""}"><input type="radio" name="provider" value="${id}" ${auctioneerProfile.provider === id ? "checked" : ""} ${unavailable ? "disabled" : ""} /><span><strong>${name}</strong><small>${escapeHtml(copy)}</small></span></label>`;
+      }).join("")}
+    </div></fieldset>
     <label class="audio-enabled-row"><span><strong>Auctioneer voice</strong><small>Keep announcements, countdowns, and rulings audible.</small></span><input name="enabled" type="checkbox" ${voiceEnabled ? "checked" : ""} /><b></b></label>
+    <label class="audio-enabled-row play-by-play-row"><span><strong>Continuous play-by-play</strong><small data-patter-provider-message>${escapeHtml(patterDirectorLabel())} Bids and rulings always interrupt.</small></span><input name="playByPlayEnabled" type="checkbox" ${auctioneerProfile.playByPlayEnabled ? "checked" : ""} /><b></b></label>
+    <label class="audio-enabled-row roast-enabled-row"><span><strong>Playful fantasy roasts</strong><small data-roast-provider-message>${escapeHtml(roastWriterLabel())} Roasts target bids and roster choices—not personal traits.</small></span><input name="roastingEnabled" type="checkbox" ${auctioneerProfile.roastingEnabled ? "checked" : ""} /><b></b></label>
     <fieldset class="audio-fieldset"><legend>PERSONALITY</legend><div class="personality-grid">
       ${Object.entries(AUCTIONEER_PERSONALITIES).map(([id, profile]) => `<label class="personality-option"><input type="radio" name="personality" value="${id}" ${auctioneerProfile.personality === id ? "checked" : ""} /><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.description)}</small></span><i>✓</i></label>`).join("")}
     </div></fieldset>
@@ -405,11 +432,17 @@ function wireGlobalEvents() {
         return render();
       }
       if (action === "audio-settings") {
+        clearPatter();
         document.querySelector("#audio-dialog")?.showModal();
-        void auctioneerVoice.initialize();
+        void auctioneerVoice.initialize(auctioneerProfile.provider);
         return;
       }
-      if (action === "close-audio") { stopAuctioneer(); return document.querySelector("#audio-dialog")?.close(); }
+      if (action === "close-audio") {
+        stopAuctioneer();
+        void auctioneerVoice.setProvider(auctioneerProfile.provider);
+        document.querySelector("#audio-dialog")?.close();
+        return resumeAuctionFlow();
+      }
       if (action === "test-audio") return runAudioPreflight(button);
       if (action === "setup-next") {
         if (!validateSetupStep(setupStep)) return;
@@ -440,7 +473,7 @@ function wireGlobalEvents() {
   app.addEventListener("change", (event) => {
     if (event.target.id === "auto-toggle") {
       autoEnabled = event.target.checked;
-      if (autoEnabled && ["open", "once", "twice"].includes(state.auction.phase)) scheduleCountdown();
+      if (isLiveAuctionPhase(state.auction.phase)) resumeAuctionFlow();
       else clearTimer();
     }
     if (event.target.id === "csv-input") {
@@ -460,16 +493,24 @@ function wireGlobalEvents() {
       const data = new FormData(event.target);
       auctioneerProfile = {
         enabled: data.get("enabled") === "on",
+        playByPlayEnabled: data.get("playByPlayEnabled") === "on",
+        roastingEnabled: data.get("roastingEnabled") === "on",
+        provider: ["auto", "elevenlabs", "cartesia"].includes(data.get("provider")) ? data.get("provider") : "auto",
         personality: AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic",
         energy: Math.min(3, Math.max(1, Number(data.get("energy")) || 2))
       };
       voiceEnabled = auctioneerProfile.enabled;
       auctioneerScript = createAuctioneerScript(auctioneerProfile);
+      patterQueue = [];
+      patterQueueKey = "";
       localStorage.setItem(AUCTIONEER_PROFILE_STORAGE_KEY, JSON.stringify(auctioneerProfile));
+      void auctioneerVoice.setProvider(auctioneerProfile.provider);
       if (!voiceEnabled) stopAuctioneer();
+      else if (!auctioneerProfile.playByPlayEnabled) clearPatter();
       document.querySelector("#audio-dialog")?.close();
       render();
-      showNotice({ kind: "success", message: `${AUCTIONEER_PERSONALITIES[auctioneerProfile.personality].name} is set to energy level ${auctioneerProfile.energy}.` });
+      resumeAuctionFlow();
+      showNotice({ kind: "success", message: `${AUCTIONEER_PERSONALITIES[auctioneerProfile.personality].name} is at energy ${auctioneerProfile.energy}; play-by-play ${auctioneerProfile.playByPlayEnabled ? "on" : "off"}, roasts ${auctioneerProfile.roastingEnabled ? "on" : "off"}.` });
       return;
     }
     if (event.target.id === "csv-mapping-form") {
@@ -552,19 +593,21 @@ function wireGlobalEvents() {
 
 function beginAuction() {
   clearTimer();
+  clearPatter();
   clearVisualBidWindow();
   pendingVisualTie = null;
   state = openAuction(state);
   persistDraft();
   render();
   const player = currentPlayer(state);
-  speak(auctioneerScript.nomination(player), scheduleCountdown, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
+  speak(auctioneerScript.nomination(player), resumeAuctionFlow, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
 }
 
 function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   const input = document.querySelector("#manual-amount");
   const amount = bidAmount ?? (input ? Number(input.value) : null);
   clearTimer();
+  clearPatter();
   clearVisualBidWindow();
   pendingVisualTie = null;
   state = placeBid(state, teamId, amount);
@@ -572,7 +615,7 @@ function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   render();
   const team = state.teams.find((item) => item.id === teamId);
   const next = state.auction.amount + state.config.increment;
-  speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), scheduleCountdown, {
+  speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), resumeAuctionFlow, {
     style: "bid",
     priority: SPEECH_PRIORITY.bid
   });
@@ -581,16 +624,21 @@ function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
 function runCountdownStep(force = false) {
   if (!force && (pendingVisualTie || visualBidWindow)) return;
   clearTimer();
+  clearPatter();
   const before = state.auction.phase;
   state = advanceCountdown(state);
   persistDraft();
   render();
-  if (state.auction.phase === "once") speak(auctioneerScript.goingOnce(state.auction.amount), scheduleCountdown, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
-  else if (state.auction.phase === "twice") speak(auctioneerScript.goingTwice(state.auction.amount), scheduleCountdown, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+  if (state.auction.phase === "once") speak(auctioneerScript.goingOnce(state.auction.amount), resumeAuctionFlow, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+  else if (state.auction.phase === "twice") speak(auctioneerScript.goingTwice(state.auction.amount), resumeAuctionFlow, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
   else if (state.auction.phase === "sold") {
     const player = currentPlayer(state);
     const team = state.teams.find((item) => item.id === state.auction.highBidderId);
-    speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), null, { style: "sold", priority: SPEECH_PRIORITY.sold });
+    const sale = state.sales.at(-1);
+    const context = saleRoastContext(player, team, state.auction.amount);
+    speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), () => {
+      void maybeSpeakSaleRoast(sale?.id, context);
+    }, { style: "sold", priority: SPEECH_PRIORITY.sold });
   } else if (state.auction.phase === "passed" && before === "open") {
     speak(auctioneerScript.passed(currentPlayer(state)), null, { style: "passed", priority: SPEECH_PRIORITY.sold });
   }
@@ -603,9 +651,134 @@ function scheduleCountdown() {
   countdownTimer = window.setTimeout(runCountdownStep, delay);
 }
 
+function resumeAuctionFlow() {
+  scheduleCountdown();
+  void refillPatterQueue();
+  schedulePatter();
+}
+
+function schedulePatter() {
+  clearPatter();
+  if (!voiceEnabled
+    || !auctioneerProfile.playByPlayEnabled
+    || !isLiveAuctionPhase(state.auction.phase)
+    || pendingVisualTie
+    || visualBidWindow
+    || document.querySelector("#audio-dialog")?.open) return;
+  const delay = patterDelayMs({ energy: auctioneerProfile.energy, sequence: patterSequence });
+  patterSequence += 1;
+  patterTimer = window.setTimeout(speakPatter, delay);
+}
+
+function speakPatter() {
+  patterTimer = null;
+  if (!voiceEnabled || !auctioneerProfile.playByPlayEnabled || !isLiveAuctionPhase(state.auction.phase) || pendingVisualTie || visualBidWindow) return;
+  if (auctioneerVoice.isSpeaking) {
+    patterTimer = window.setTimeout(speakPatter, 120);
+    return;
+  }
+  const player = currentPlayer(state);
+  if (!player) return;
+  const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
+  const nextAmount = Math.max(1, state.auction.amount + state.config.increment);
+  const key = currentPatterKey();
+  if (patterQueueKey !== key) {
+    patterQueue = [];
+    patterQueueKey = key;
+  }
+  const localLine = () => auctioneerScript.patter({
+    player,
+    amount: state.auction.amount,
+    manager: highBidder?.manager || null,
+    nextAmount,
+    phase: state.auction.phase,
+    suggestedValue: Number(player.suggestedValue) || 0
+  });
+  const line = patterQueue.shift() || localLine();
+  recentPatterLines = [...recentPatterLines.slice(-7), line];
+  if (patterQueue.length <= 1) void refillPatterQueue();
+  speak(line, schedulePatter, { style: "patter", priority: SPEECH_PRIORITY.patter });
+}
+
+async function refillPatterQueue() {
+  if (!voiceEnabled || !auctioneerProfile.playByPlayEnabled || !isLiveAuctionPhase(state.auction.phase)) return;
+  if (auctioneerService.patter?.available === false) return;
+  const key = currentPatterKey();
+  if (!key) return;
+  if (patterQueueKey !== key) {
+    patterQueue = [];
+    patterQueueKey = key;
+  }
+  if (patterRequest?.key === key || patterQueue.length > 1) return;
+  const requestId = ++patterRequestSequence;
+  patterRequest = { key, requestId };
+  try {
+    const response = await fetch("/api/auctioneer/patter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: livePatterContext(),
+        recentLines: recentPatterLines,
+        personality: auctioneerProfile.personality,
+        energy: auctioneerProfile.energy
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || currentPatterKey() !== key || !Array.isArray(payload.lines) || payload.lines.length !== 3) return;
+    const recent = new Set(recentPatterLines.map((line) => line.toLowerCase()));
+    const freshLines = payload.lines
+      .map((line) => String(line || "").trim())
+      .filter((line) => line && !recent.has(line.toLowerCase()));
+    patterQueue = [...patterQueue, ...freshLines].slice(0, 5);
+  } catch {
+    // The local rotating script keeps the room moving without waiting for the model.
+  } finally {
+    if (patterRequest?.requestId === requestId) patterRequest = null;
+  }
+}
+
+function currentPatterKey() {
+  if (!isLiveAuctionPhase(state.auction.phase)) return "";
+  return [state.auction.playerId, state.auction.phase, state.auction.amount, state.auction.highBidderId, state.auction.bidCount].join(":");
+}
+
+function livePatterContext() {
+  const player = currentPlayer(state);
+  const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
+  const roster = (highBidder?.roster || []).map((spot) => {
+    const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
+    return { name: rosterPlayer?.name, position: rosterPlayer?.position, price: spot.price };
+  });
+  const recentSales = state.sales.slice(-5).map((sale) => ({
+    playerName: state.players.find((item) => item.id === sale.playerId)?.name,
+    managerName: state.teams.find((team) => team.id === sale.teamId)?.manager,
+    amount: sale.amount
+  }));
+  return {
+    phase: state.auction.phase,
+    playerName: player?.name,
+    position: player?.position,
+    nflTeam: player?.nflTeam,
+    amount: state.auction.amount,
+    nextAmount: Math.max(1, state.auction.amount + state.config.increment),
+    suggestedValue: player?.suggestedValue,
+    highBidderManager: highBidder?.manager,
+    highBidderTeam: highBidder?.name,
+    highBidderBudgetRemaining: highBidder?.budget,
+    bidCount: state.auction.bidCount,
+    roster,
+    recentSales
+  };
+}
+
 function clearTimer() {
   if (countdownTimer) window.clearTimeout(countdownTimer);
   countdownTimer = null;
+}
+
+function clearPatter() {
+  if (patterTimer) window.clearTimeout(patterTimer);
+  patterTimer = null;
 }
 
 function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
@@ -619,15 +792,63 @@ function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
   });
 }
 
-function runAudioPreflight(button) {
+function saleRoastContext(player, team, amount) {
+  const roster = (team?.roster || []).map((spot) => {
+    const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
+    return {
+      name: rosterPlayer?.name,
+      position: rosterPlayer?.position,
+      nflTeam: rosterPlayer?.nflTeam,
+      price: spot.price
+    };
+  });
+  return {
+    managerName: team?.manager,
+    fantasyTeamName: team?.name,
+    playerName: player?.name,
+    position: player?.position,
+    nflTeam: player?.nflTeam,
+    amount,
+    suggestedValue: player?.suggestedValue,
+    budgetRemaining: team?.budget,
+    rosterCount: roster.length,
+    rosterSize: state.config.rosterSize,
+    roster
+  };
+}
+
+async function maybeSpeakSaleRoast(saleId, context) {
+  if (!saleId || !voiceEnabled || !auctioneerProfile.roastingEnabled) return;
+  try {
+    const response = await fetch("/api/auctioneer/roast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context,
+        recentRoasts,
+        personality: auctioneerProfile.personality
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    const saleStillCurrent = state.auction.phase === "sold" && state.sales.at(-1)?.id === saleId;
+    if (!response.ok || !saleStillCurrent || !voiceEnabled || !auctioneerProfile.roastingEnabled || !payload.text) return;
+    recentRoasts = [...recentRoasts.slice(-4), String(payload.text)];
+    speak(payload.text, null, { style: "roast", priority: SPEECH_PRIORITY.roast });
+  } catch {}
+}
+
+async function runAudioPreflight(button) {
   const form = document.querySelector("#audio-form");
   if (!form) return;
   const data = new FormData(form);
   const personality = AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic";
   const energy = Math.min(3, Math.max(1, Number(data.get("energy")) || 2));
+  const provider = ["auto", "elevenlabs", "cartesia"].includes(data.get("provider")) ? data.get("provider") : "auto";
   const check = form.querySelector("[data-audio-check]");
+  clearPatter();
   button.disabled = true;
   if (check) check.textContent = "Lucy is speaking now…";
+  await auctioneerVoice.setProvider(provider);
   const previewScript = createAuctioneerScript({ personality });
   auctioneerVoice.speak(previewScript.preflight(), {
     style: "preflight",
@@ -646,12 +867,17 @@ function updateAudioServiceStatus() {
   const card = dialog?.querySelector(".audio-provider-card");
   const label = dialog?.querySelector("[data-audio-provider-label]");
   const message = dialog?.querySelector("[data-audio-provider-message]");
+  const roastMessage = dialog?.querySelector("[data-roast-provider-message]");
+  const patterMessage = dialog?.querySelector("[data-patter-provider-message]");
   card?.classList.toggle("is-fallback", auctioneerService.provider === "browser");
   if (label) label.textContent = audioProviderLabel();
   if (message) message.textContent = auctioneerService.message;
+  if (roastMessage) roastMessage.textContent = `${roastWriterLabel()} Roasts target bids and roster choices—not personal traits.`;
+  if (patterMessage) patterMessage.textContent = `${patterDirectorLabel()} Bids and rulings always interrupt.`;
 }
 
 function stopAuctioneer() {
+  clearPatter();
   auctioneerVoice.cancel();
 }
 
@@ -670,6 +896,7 @@ function collectExternalBids(bids, source, receivedAt = Date.now()) {
 
   if (!eligibleBids.length) return;
   clearTimer();
+  clearPatter();
   if (!visualBidWindow) {
     visualBidWindow = {
       bids: new Map(),
@@ -694,12 +921,12 @@ function resolveVisualBidWindow() {
   if (result.kind === "none") {
     pendingVisualTie = null;
     render();
-    scheduleCountdown();
+    resumeAuctionFlow();
     return;
   }
   if (result.kind === "bid") {
     try { submitBid(result.teamId, result.amount, { source: batch.source }); }
-    catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
+    catch (error) { showNotice({ kind: "error", message: error.message }); resumeAuctionFlow(); }
     return;
   }
 
@@ -735,14 +962,14 @@ function resolveVisualTie(teamId) {
   if (!pendingVisualTie?.teamIds.includes(teamId)) return;
   const amount = pendingVisualTie.amount;
   try { submitBid(teamId, amount, { source: pendingVisualTie.source }); }
-  catch (error) { showNotice({ kind: "error", message: error.message }); scheduleCountdown(); }
+  catch (error) { showNotice({ kind: "error", message: error.message }); resumeAuctionFlow(); }
 }
 
 function cancelVisualTie() {
   clearVisualBidWindow();
   pendingVisualTie = null;
   render();
-  scheduleCountdown();
+  resumeAuctionFlow();
 }
 
 function clearVisualBidWindow() {
@@ -968,14 +1195,37 @@ function qrCodeSvg(text) {
 function auctioneerVoiceTitle() {
   if (!voiceEnabled) return "Turn on auctioneer voice";
   const profileName = AUCTIONEER_PERSONALITIES[auctioneerProfile.personality]?.name || "Lucy";
-  if (auctioneerService.status === "ready" && auctioneerService.available) return `${profileName} is on with Cartesia ${auctioneerService.model}`;
+  if (auctioneerService.status === "ready" && auctioneerService.available) return `${profileName} is on with ${providerName(auctioneerService.provider)} ${auctioneerService.model}`;
   return `${profileName} is on with browser voice fallback`;
 }
 
 function audioProviderLabel() {
   if (auctioneerService.provider === "browser" || auctioneerService.available === false) return "BROWSER VOICE FAILOVER ACTIVE";
   const cached = Number(auctioneerService.countdownCacheEntries) || 0;
-  return `CARTESIA REALTIME · ${cached} COUNTDOWN${cached === 1 ? "" : "S"} CACHED`;
+  return `${providerName(auctioneerService.provider).toUpperCase()} REALTIME · ${cached} COUNTDOWN${cached === 1 ? "" : "S"} CACHED`;
+}
+
+function providerName(provider) {
+  return provider === "elevenlabs" ? "ElevenLabs" : provider === "cartesia" ? "Cartesia" : "Browser voice";
+}
+
+function providerOptionCopy(provider) {
+  const status = auctioneerService.providers?.[provider];
+  if (!status) return "Checking availability";
+  if (!status.available) return provider === "elevenlabs" ? "Needs API key + voice ID" : "Needs API key";
+  return status.connected ? "Warm persistent stream" : `${status.model || "Realtime"} · ready on demand`;
+}
+
+function patterDirectorLabel() {
+  return auctioneerService.patter?.provider === "openai"
+    ? "The AI Patter Director writes three-line live arcs ahead of playback."
+    : "Lucy's local rotation fills live gaps with rapid stadium-style patter.";
+}
+
+function roastWriterLabel() {
+  return auctioneerService.roasting?.provider === "openai"
+    ? "OpenAI riffs on the live bidding context."
+    : "Lucy uses the built-in contextual roast rotation.";
 }
 
 function restoreDraft() {
@@ -997,10 +1247,13 @@ function restoreAuctioneerProfile() {
     const saved = JSON.parse(localStorage.getItem(AUCTIONEER_PROFILE_STORAGE_KEY));
     return {
       enabled: saved?.enabled !== false,
+      playByPlayEnabled: saved?.playByPlayEnabled !== false,
+      roastingEnabled: saved?.roastingEnabled !== false,
+      provider: ["auto", "elevenlabs", "cartesia"].includes(saved?.provider) ? saved.provider : "auto",
       personality: AUCTIONEER_PERSONALITIES[saved?.personality] ? saved.personality : "classic",
       energy: Math.min(3, Math.max(1, Number(saved?.energy) || 2))
     };
-  } catch { return { enabled: true, personality: "classic", energy: 2 }; }
+  } catch { return { enabled: true, playByPlayEnabled: true, roastingEnabled: true, provider: "auto", personality: "classic", energy: 2 }; }
 }
 
 function normalizedRequirements() {

@@ -8,8 +8,10 @@ const DEFAULT_SAMPLE_RATE = 24_000;
 const DIRECTIONS = Object.freeze({
   nomination: { speed: 1.03, emotion: "enthusiastic" },
   bid: { speed: 1.14, emotion: "excited" },
+  patter: { speed: 1.12, emotion: "enthusiastic" },
   countdown: { speed: 0.94, emotion: "anticipation" },
   sold: { speed: 1.03, emotion: "triumphant" },
+  roast: { speed: 1.0, emotion: "sarcastic" },
   ruling: { speed: 1.0, emotion: "determined" },
   passed: { speed: 0.98, emotion: "sarcastic" },
   neutral: { speed: 1.0, emotion: "neutral" }

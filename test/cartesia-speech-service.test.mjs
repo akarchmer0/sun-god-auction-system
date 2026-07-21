@@ -30,6 +30,16 @@ test("personality and energy adjust Cartesia performance direction", () => {
   assert.equal(fullSend.emotion, "excited");
 });
 
+test("roasts use a dry sarcastic performance direction", () => {
+  assert.deepEqual(speechDirections("roast"), { speed: 1, emotion: "sarcastic" });
+});
+
+test("continuous patter is faster and energetic", () => {
+  const patter = speechDirections("patter");
+  assert.equal(patter.emotion, "enthusiastic");
+  assert.ok(patter.speed > speechDirections("nomination").speed);
+});
+
 test("Cartesia service warms one socket and routes audio by context", async () => {
   class FakeWebSocket {
     static instance;

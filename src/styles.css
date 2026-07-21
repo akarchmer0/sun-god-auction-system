@@ -266,6 +266,7 @@ button { color: inherit; }
 .draft-results-button small { margin-top: 5px; color: #c7bda9; font: 500 7px/1 "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
 
 dialog { width: min(680px, 92vw); padding: 0; border: 1px solid #3b3b36; border-radius: 10px; background: #1d1d1a; color: var(--paper); box-shadow: 0 30px 90px rgba(0,0,0,.7); }
+#audio-dialog { max-height: calc(100vh - 24px); overflow: auto; }
 dialog::backdrop { background: rgba(5,5,4,.7); backdrop-filter: blur(4px); }
 dialog form { padding: 24px; }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; }
@@ -335,8 +336,20 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .audio-enabled-row b::after { content:""; width: 14px; height: 14px; position: absolute; top: 2px; left: 2px; border-radius: 50%; background: #fff9ed; transition: .18s; }
 .audio-enabled-row input:checked + b { background: var(--paper); }
 .audio-enabled-row input:checked + b::after { transform: translateX(16px); background: var(--orange); }
+.play-by-play-row { background: #e4e8d7; }
+.play-by-play-row strong::after { content: "LIVE"; margin-left: 7px; border: 1px solid #537059; border-radius: 9px; padding: 2px 5px; color: #3d5c46; font: 700 6px/1 "DM Mono", monospace; letter-spacing: .08em; vertical-align: 1px; }
+.roast-enabled-row { background: #f1dfc2; }
+.roast-enabled-row strong::after { content: "DEFAULT ON"; margin-left: 7px; border: 1px solid #9a6032; border-radius: 9px; padding: 2px 5px; color: #78431d; font: 700 6px/1 "DM Mono", monospace; letter-spacing: .08em; vertical-align: 1px; }
 .audio-fieldset { margin: 17px 0 0; padding: 0; border: 0; }
 .audio-fieldset legend { margin-bottom: 8px; color: #554d41; font: 700 8px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.provider-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.provider-option { min-height: 48px; display: grid; align-items: center; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; background: #fff9ed; cursor: pointer; position: relative; }
+.provider-option input { position: absolute; opacity: 0; }
+.provider-option strong,.provider-option small { display: block; }
+.provider-option strong { font-size: 9px; }
+.provider-option small { margin-top: 4px; color: var(--muted); font-size: 7px; line-height: 1.25; }
+.provider-option:has(input:checked) { border: 2px solid var(--paper); padding: 7px 9px; background: #e4e8d7; box-shadow: 3px 3px 0 var(--orange); }
+.provider-option.is-unavailable { opacity: .52; cursor: not-allowed; }
 .personality-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .personality-option { min-height: 82px; display: grid; grid-template-columns: 1fr auto; align-items: start; border: 1px solid var(--line); border-radius: 6px; padding: 11px; background: #fff9ed; cursor: pointer; position: relative; }
 .personality-option input,.energy-grid input { position: absolute; opacity: 0; }
@@ -501,4 +514,14 @@ dialog::backdrop { background: rgba(29,24,17,.48); }
   .player-identity h1 { font-size: 40px; }
   .bid-number { font-size: 70px; }
   .bid-display { margin-top: 18px; }
+  #audio-dialog form { padding: 16px 24px; }
+  #audio-dialog .audio-provider-card { min-height: 54px; margin-top: 10px; padding-block: 8px; }
+  #audio-dialog .audio-enabled-row { min-height: 46px; margin-top: 7px; padding-block: 7px; }
+  #audio-dialog .audio-fieldset { margin-top: 11px; }
+  #audio-dialog .provider-option { min-height: 42px; padding-block: 6px; }
+  #audio-dialog .personality-option { min-height: 64px; padding: 8px 10px; }
+  #audio-dialog .personality-option:has(input:checked) { padding: 7px 9px; }
+  #audio-dialog .energy-grid label { min-height: 40px; padding: 6px; }
+  #audio-dialog .audio-preflight { min-height: 52px; margin-top: 11px; padding-block: 7px; }
+  #audio-dialog .dialog-actions { margin-top: 13px; }
 }

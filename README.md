@@ -1,6 +1,6 @@
 # Sun God Auction Systems
 
-Sun God Auction Systems is a local-first fantasy football auction draft room with a reactive Cartesia AI auctioneer, zero-install phone bidding, salary-cap enforcement, live rosters, and a reversible sale ledger.
+Sun God Auction Systems is a local-first fantasy football auction draft room with selectable ElevenLabs or Cartesia speech, an AI Patter Director, zero-install phone bidding, salary-cap enforcement, live rosters, and a reversible sale ledger.
 
 ## Run it
 
@@ -12,9 +12,26 @@ The launcher uses Node from your shell when available and otherwise uses the Nod
 
 Then open `http://localhost:4173` in Chrome. Keep the laptop and bidder phones on the same Wi-Fi network.
 
-No API key is required for the core draft room. Cartesia powers the upgraded realtime auctioneer when configured and automatically falls back to the browser voice otherwise. Participant bids are submitted only through their claimed phone controls.
+No API key is required for the core draft room. ElevenLabs and Cartesia can power the upgraded realtime auctioneer when configured; Auto mode prefers ElevenLabs, then Cartesia, then the browser voice. Participant bids are submitted only through their claimed phone controls.
 
-## Cartesia AI auctioneer
+Lucy playfully roasts fantasy-football decisions after completed sales by default. Open **Lucy’s booth** to turn roasts off for the league. The built-in rotation works without a key; adding `OPENAI_API_KEY` lets Lucy select and rewrite those house lines from the live player, price, manager, suggested value, budget, and roster context. Only those displayed draft facts are sent to OpenAI—never phone identifiers or claim tokens. The model is explicitly told not to invent injuries, rookie status, ADP, coach quotes, or depth-chart facts. Set `OPENAI_ROAST_MODEL` to override the default low-latency `gpt-5.6-luna` writer.
+
+## Realtime AI auctioneer
+
+ElevenLabs supplies the voice performance, not the auction content. Sun God owns the words: deterministic calls handle official bids and countdowns, while the optional OpenAI Patter Director writes short live arcs from the current player, bidder, price, budget, roster, and recent sales.
+
+### ElevenLabs auction voice
+
+Sun God keeps one ElevenLabs multi-context WebSocket warm on the Mac. Each announcement gets an independent context on that socket, so a bid can close the current patter context and begin immediately without reconnecting the provider.
+
+1. Create an ElevenLabs API key.
+2. In the ElevenLabs Voice Library, save or share the auction voice you want and copy its voice ID.
+3. Copy `.env.example` to `.env`, then set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`.
+4. Restart Sun God and choose **ElevenLabs** or **Auto** in Lucy's booth.
+
+The server exchanges the permanent key for a single-use WebSocket token. The permanent ElevenLabs key is never sent to the browser. Sun God defaults to the low-latency `eleven_flash_v2_5` model; override it with `ELEVENLABS_MODEL` only with another model compatible with ElevenLabs' multi-context WebSocket.
+
+### Cartesia Lucy
 
 Sun God keeps a Cartesia WebSocket warm on the Mac and streams raw audio to the host browser. Every announcement has its own speech context. A valid phone bid immediately stops the currently scheduled audio and begins a fresh, energetic bid acknowledgement; countdowns, rulings, nominations, and sales each use different pacing and emotional direction.
 
@@ -29,9 +46,13 @@ Sun God keeps a Cartesia WebSocket warm on the Mac and streams raw audio to the 
 3. Put the key after `CARTESIA_API_KEY=` and restart with `./start.command`.
 4. Restart Sun God. The volume button in the host header reports the active auctioneer provider when you hover over it.
 
-The permanent Cartesia key stays in the Mac's local `.env` file and is read only by `server.mjs`. The browser receives only generated PCM audio. The default is Cartesia's British Lucy voice on `sonic-3.5`; set `CARTESIA_VOICE_ID` in `.env` to any voice ID from the Cartesia playground to change it. If Cartesia is unconfigured or temporarily unavailable, Sun God automatically uses the operating system's browser voice so the draft can continue.
+The permanent Cartesia key stays in the Mac's local `.env` file and is read only by `server.mjs`. The browser receives only generated PCM audio. The default is Cartesia's British Lucy voice on `sonic-3.5`; set `CARTESIA_VOICE_ID` in `.env` to any voice ID from the Cartesia playground to change it.
 
-Click the volume control to open **Lucy’s booth** before the draft. The room check speaks “Can you hear Lucy?” using the currently selected settings. Choose among Lucy Classic, Hype House, and League Pro personalities, then set the energy to Measured, Draft night, or Full send. These choices change both the auction script and realtime performance direction and persist on the draft laptop.
+Click the volume control to open **Lucy’s booth** before the draft. The room check speaks “Can you hear Lucy?” using the currently selected settings. Choose among Lucy Classic, Stadium Pulse, and League Pro personalities, set the energy to Measured, Draft night, or Full send, and choose whether Lucy should run continuous play-by-play or roast the bidders. These choices change both the auction script and realtime performance direction and persist on the draft laptop.
+
+Continuous play-by-play is on by default. With `OPENAI_API_KEY` configured, the AI Patter Director prepares exactly three short connected lines ahead of playback from the player, current leader, price, next bid, suggested value, budget, roster, bid count, and recent sales. Its prompt asks for the escalation and celebratory release of elite Latin American soccer commentary without imitating an accent or inventing football facts. Every price, phase, or leader change invalidates the queued lines before they can become stale. If OpenAI is unavailable or slow, Lucy immediately uses the local rotating script instead. Set `OPENAI_PATTER_MODEL` to override the default `gpt-5.6-luna` director.
+
+Higher energy levels leave less air between lines. Actual bids, ties, pauses, countdown calls, and sales immediately interrupt the patter, and the statutory countdown continues on its own clock.
 
 Completed countdown calls are cached in a bounded in-memory audio cache, keyed by phrase, voice, personality, and energy. Repeated calls can play without another generation round trip. If realtime speech is unavailable or stalls, the host switches that announcement to a preferred English browser voice with matching energy and pacing. Opening Lucy’s booth refreshes status and retries the configured realtime provider.
 
@@ -95,17 +116,24 @@ The results page can download a universal CSV or copy tab-separated tables arran
 
 - `src/domain.mjs` is the deterministic auction engine. Phones cannot mutate budgets directly.
 - `src/app.mjs` coordinates the host room, phone bid decisions, auctioneer direction, and the auction UI.
-- `src/auctioneer-script.mjs` rotates natural nomination, bid, countdown, sale, and ruling lines without changing auction state.
-- `src/auctioneer-voice.mjs` streams Cartesia PCM into an interruptible Web Audio queue and owns browser-voice fallback.
+- `src/auctioneer-script.mjs` rotates natural nomination, bid, continuous patter, countdown, sale, and ruling lines without changing auction state.
+- `src/auctioneer-patter.mjs` owns the energy-sensitive gap timing and live-phase boundary for continuous commentary.
+- `src/patter-director.mjs` bounds the live context and owns the three-line momentum prompt and strict output contract.
+- `src/openai-patter-service.mjs` prefetches structured patter queues through the OpenAI Responses API without blocking local fallback.
+- `src/roast-engine.mjs` owns Lucy's fantasy-football reference rotation, contextual fallback lines, and truth/taste prompt constraints.
+- `src/openai-roast-service.mjs` writes short context-aware roasts through the OpenAI Responses API while keeping the permanent key server-side.
+- `src/auctioneer-voice.mjs` streams provider PCM into an interruptible Web Audio queue and owns browser-voice fallback.
+- `src/elevenlabs-speech-service.mjs` keeps one token-authenticated multi-context ElevenLabs WebSocket warm and closes individual contexts on interruption.
 - `src/cartesia-speech-service.mjs` keeps the authenticated Cartesia WebSocket warm, applies per-event performance direction, and multiplexes speech contexts without exposing the API key.
+- `src/auctioneer-speech-providers.mjs` resolves explicit provider choices and the ElevenLabs → Cartesia → browser Auto order.
 - `src/bidder.mjs` renders the zero-install participant experience and submits authenticated team bids.
 - `src/phone-bidding.mjs` calculates round-number easy bids and resolves simultaneous jump bids by amount.
 - `src/phone-room-hub.mjs` owns room codes, exclusive team claims, server timestamps, live state, and participant events.
 - `src/vision-bidding.mjs` supplies the shared 300 ms simultaneous-bid classification used by the host.
-- `server.mjs` serves the host and phone pages, broadcasts local room events, and relays Cartesia speech; the permanent Cartesia API key remains server-side.
+- `server.mjs` serves the host and phone pages, broadcasts local room events, directs patter, and relays ElevenLabs or Cartesia speech; permanent provider keys remain server-side.
 - Draft state is persisted in `localStorage`.
 - Phone-room traffic stays on the local network. Sun God does not capture or transcribe bidder audio.
-- Cartesia is the production auctioneer voice provider; the browser speech engine remains an automatic fallback.
+- ElevenLabs and Cartesia are selectable production voice providers; the browser speech engine remains the automatic final fallback.
 
 ## Test
 
@@ -113,4 +141,4 @@ The results page can download a universal CSV or copy tab-separated tables arran
 node --test
 ```
 
-The tests cover bid increments, reserve-budget rules, countdown transitions, completed sales, undo, no-bid queue rotation, phone-room claims/state/server timestamps, custom and easy phone bids, simultaneous bids, and Cartesia speech streaming.
+The tests cover bid increments, reserve-budget rules, countdown transitions, completed sales, undo, no-bid queue rotation, phone-room claims/state/server timestamps, custom and easy phone bids, simultaneous bids, persistent ElevenLabs and Cartesia speech streaming, provider selection, and structured AI patter generation.
