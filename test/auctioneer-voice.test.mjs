@@ -11,7 +11,29 @@ test("PCM decoder converts little-endian signed 16-bit samples", () => {
   assert.ok(samples[2] > 0.999);
 });
 
-test("a new fallback announcement interrupts the previous one", () => {
+test("audio unlock creates and resumes one reusable context from a user gesture", async () => {
+  let contextsCreated = 0;
+  let resumeCount = 0;
+  class FakeAudioContext {
+    constructor() {
+      contextsCreated += 1;
+      this.state = "suspended";
+    }
+
+    async resume() {
+      resumeCount += 1;
+      this.state = "running";
+    }
+  }
+  const voice = new AuctioneerVoice({ AudioContextImpl: FakeAudioContext });
+
+  assert.equal(await voice.unlock(), true);
+  assert.equal(await voice.unlock(), true);
+  assert.equal(contextsCreated, 1);
+  assert.equal(resumeCount, 1);
+});
+
+test("a new fallback announcement interrupts the previous one by default", () => {
   const utterances = [];
   let cancelCount = 0;
   class FakeUtterance {
@@ -40,6 +62,54 @@ test("a new fallback announcement interrupts the previous one", () => {
   assert.ok(cancelCount >= 2);
 });
 
+test("queued bid announcements finish the current line and collapse to the best new bid", () => {
+  const utterances = [];
+  let cancelCount = 0;
+  class FakeUtterance {
+    constructor(text) { this.text = text; }
+  }
+  const speechSynthesis = {
+    cancel() { cancelCount += 1; },
+    getVoices() { return []; },
+    speak(utterance) { utterances.push(utterance); }
+  };
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: null,
+    speechSynthesisImpl: speechSynthesis,
+    UtteranceImpl: FakeUtterance
+  });
+  voice.status.available = false;
+  let firstBidFinished = false;
+  let bestBidFinished = false;
+
+  voice.speak("This room is heating up", { style: "patter" });
+  const cancelsBeforeBids = cancelCount;
+  voice.speak("Alex bids thirty-five", {
+    style: "bid",
+    priority: 100,
+    interrupt: false,
+    queueKey: "live-bid",
+    onDone: () => { firstBidFinished = true; }
+  });
+  voice.speak("Jordan bids forty", {
+    style: "bid",
+    priority: 100,
+    interrupt: false,
+    queueKey: "live-bid",
+    onDone: () => { bestBidFinished = true; }
+  });
+
+  assert.equal(utterances.length, 1);
+  assert.equal(cancelCount, cancelsBeforeBids);
+  utterances[0].onend();
+  assert.equal(utterances.length, 2);
+  assert.equal(utterances[1].text, "Jordan bids forty");
+  assert.equal(firstBidFinished, false);
+  utterances[1].onend();
+  assert.equal(bestBidFinished, true);
+  assert.equal(voice.isSpeaking, false);
+});
+
 test("a stalled realtime stream fails over to an energetic browser voice", async () => {
   const utterances = [];
   class FakeUtterance { constructor(text) { this.text = text; } }
@@ -62,4 +132,39 @@ test("a stalled realtime stream fails over to an energetic browser voice", async
   assert.equal(utterances[0].voice.name, "Samantha");
   assert.ok(utterances[0].rate > 1.1);
   assert.equal(voice.status.provider, "browser");
+});
+
+test("stream completion watchdog releases speech when a PCM source omits onended", async () => {
+  class FakeAudioContext {
+    constructor() {
+      this.state = "running";
+      this.currentTime = 0;
+      this.destination = {};
+    }
+    createBuffer() {
+      return { duration: 0, copyToChannel() {} };
+    }
+    createBufferSource() {
+      return { connect() {}, start() {}, stop() {}, onended: null };
+    }
+  }
+  const pcm = Buffer.from([0, 0]).toString("base64");
+  const stream = [
+    { type: "start", provider: "elevenlabs", sampleRate: 24_000 },
+    { type: "audio", data: pcm },
+    { type: "done" }
+  ].map((event) => `${JSON.stringify(event)}\n`).join("");
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: FakeAudioContext,
+    playbackCompletionGraceMs: 5,
+    fetchImpl: async () => new Response(stream, { status: 200 })
+  });
+  voice.status.available = true;
+  let finished = false;
+
+  voice.speak("Keep the patter moving", { onDone: () => { finished = true; } });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(finished, true);
+  assert.equal(voice.isSpeaking, false);
 });

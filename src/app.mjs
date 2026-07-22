@@ -1,8 +1,14 @@
-import { seedPlayers, makeTeams } from "./data.mjs";
+import { seedPlayers, makeTeams, parseTeamSetupLines } from "./data.mjs";
 import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { createAuctioneerScript, AUCTIONEER_PERSONALITIES } from "./auctioneer-script.mjs";
-import { isLiveAuctionPhase, patterDelayMs } from "./auctioneer-patter.mjs";
+import {
+  buildPatterPassage,
+  isLiveAuctionPhase,
+  LOCAL_PATTER_PASSAGE_LINES,
+  patterDelayMs
+} from "./auctioneer-patter.mjs";
+import { shouldRoastSale } from "./roast-engine.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import {
   parseCsv,
@@ -31,6 +37,16 @@ import {
   canTeamRosterPlayer,
   ROSTER_POSITIONS
 } from "./domain.mjs";
+import {
+  autoBidDelayMs,
+  autoTeamController,
+  buildAutoIntentContext,
+  chooseAutoBid,
+  chooseAutoNomination,
+  isAutoTeam,
+  localAutoIntents,
+  normalizeAutoIntents
+} from "./autodraft.mjs";
 
 const STORAGE_KEY = "gavel-draft-v1";
 const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
@@ -54,6 +70,8 @@ let autoEnabled = true;
 let setupStep = 1;
 let pendingCsvImport = null;
 let countdownTimer = null;
+let autoDraftTimer = null;
+let autoIntentRequestSequence = 0;
 let patterTimer = null;
 let patterSequence = 0;
 let patterQueue = [];
@@ -90,6 +108,7 @@ const auctioneerVoice = new AuctioneerVoice({
   onStatusChange: (snapshot) => {
     const changed = snapshot.status !== auctioneerService.status
       || snapshot.available !== auctioneerService.available
+      || snapshot.provider !== auctioneerService.provider
       || snapshot.message !== auctioneerService.message
       || snapshot.patter?.message !== auctioneerService.patter?.message
       || snapshot.roasting?.message !== auctioneerService.roasting?.message;
@@ -104,6 +123,9 @@ render();
 wireGlobalEvents();
 void auctioneerVoice.initialize(auctioneerProfile.provider);
 void initializePhoneRoom();
+if (state.auction.phase === "ready") void prepareAutoIntents();
+else if (isLiveAuctionPhase(state.auction.phase)) { freezeLocalAutoIntents(); resumeAuctionFlow(); }
+else scheduleAutoNomination();
 
 function render() {
   const player = currentPlayer(state);
@@ -111,6 +133,7 @@ function render() {
   const nextNominator = currentNominator(state);
   const lotNominator = state.teams.find((team) => team.id === state.auction.nominatorTeamId) || nextNominator;
   const available = state.players.filter((item) => item.status === "available");
+  const humanTeamCount = state.teams.filter((team) => !isAutoTeam(team)).length;
   const nextPlayers = state.queue
     .map((id) => state.players.find((item) => item.id === id))
     .filter((item) => item?.status === "available" && item.id !== player?.id)
@@ -133,7 +156,7 @@ function render() {
           <span>${escapeHtml(nextNominator?.manager || "Commissioner")} ${["sold", "passed"].includes(state.auction.phase) ? "nominates next" : "nominates"}</span>
         </div>
         <div class="device-controls">
-          <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${state.teams.length} phones</span></button>
+          <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} phones</span></button>
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="audio-settings" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
@@ -161,14 +184,15 @@ function render() {
             <button data-action="copy-phone-link" ${phoneRoom.joinUrl ? "" : "disabled"}>${icon("copy")} Copy join link</button>
             <button data-action="reset-phone-claims" ${phoneRoom.claimedTeamIds.length ? "" : "disabled"}>Reset phones</button>
           </div>
-          <div class="phone-claim-summary"><span>PARTICIPANTS</span><strong>${phoneRoom.claimedTeamIds.length}/${state.teams.length} joined</strong></div>
+          <div class="phone-claim-summary"><span>PARTICIPANTS</span><strong>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} joined</strong></div>
           <div class="phone-claim-grid">
             ${state.teams.map((team) => {
               const joined = phoneRoom.claimedTeamIds.includes(team.id);
-              return `<div class="phone-claim ${joined ? "is-joined" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${joined ? "PHONE READY" : "WAITING"}</small></span>${icon(joined ? "check" : "phone")}</div>`;
+              const automatic = isAutoTeam(team);
+              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${automatic ? "AUTO DRAFT" : joined ? "PHONE READY" : "WAITING"}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
             }).join("")}
           </div>
-          <p class="camera-note">Each manager scans once, chooses their team, then uses the next-dollar button, an easy jump, or a custom whole-dollar bid. The laptop remains authoritative for budgets, rosters, and simultaneous bids.</p>
+          <p class="camera-note">Human managers scan once and choose their team. Auto teams make one strategic intent decision per nomination, then bid locally within the league rules.</p>
         </section>
 
         <section class="auction-stage">
@@ -280,6 +304,11 @@ function teamBidButton(team, index) {
   const isHigh = team.id === state.auction.highBidderId;
   const maxBid = maxBidForTeam(state, team.id);
   const phoneJoined = phoneRoom.claimedTeamIds.includes(team.id);
+  const automatic = isAutoTeam(team);
+  const autoDecision = state.auction.autoIntents?.[team.id];
+  const autoLabel = state.auction.autoIntentStatus === "pending"
+    ? "AUTO · THINKING"
+    : autoDecision?.intent ? `AUTO · ${autoDecision.intent.toUpperCase()}` : "AUTO";
   const legalRosterFit = !state.auction.playerId || canTeamRosterPlayer(state, team.id, state.auction.playerId);
   const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || !legalRosterFit || maxBid < Math.max(1, state.auction.amount + state.config.increment);
   const title = !legalRosterFit ? "This player would prevent the team from completing its required positions." : "";
@@ -289,7 +318,7 @@ function teamBidButton(team, index) {
     <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
     <span class="team-money"><strong>$${team.budget}</strong><small>max $${maxBid}</small></span>
     <span class="armed-label">${isHigh ? "HIGH BID" : "+ BID"}</span>
-    <span class="phone-bid-badge" title="${phoneJoined ? "Phone connected" : "Waiting for phone"}">${phoneJoined ? "PHONE READY" : "NO PHONE"}</span>
+    <span class="phone-bid-badge ${automatic ? "is-auto" : ""}" title="${automatic ? escapeHtml(autoDecision ? `${autoDecision.provider === "openai" ? "AI" : "Local"} strategy: ${autoDecision.reason.replaceAll("_", " ")}` : "AI strategy with local rules-based bidding") : phoneJoined ? "Phone connected" : "Waiting for phone"}">${automatic ? autoLabel : phoneJoined ? "PHONE READY" : "NO PHONE"}</span>
   </button>`;
 }
 
@@ -328,6 +357,14 @@ function setupDialog() {
     <section class="setup-step ${setupStep === 3 ? "is-active" : ""}" data-setup-step="3">
       <p>Enter one team per line as <strong>Team name | Manager</strong>. This top-to-bottom list is the repeating nomination order.</p>
       <label class="team-name-field">Teams, managers, and order<textarea name="teamNames" rows="${Math.min(12, Math.max(4, state.teams.length))}" required>${escapeHtml(orderedTeams.map((team) => `${team.name} | ${team.manager}`).join("\n"))}</textarea></label>
+      <fieldset class="autodraft-team-fieldset"><legend>AUTO DRAFT CONTROL</legend><p>Marked teams cannot be claimed by a phone. AI chooses pass, value, or target once per nomination; local rules place every bid.</p>
+        <div class="autodraft-team-grid">
+          ${Array.from({ length: 12 }, (_, index) => {
+            const team = orderedTeams[index];
+            return `<label data-auto-team-slot="${index}" ${index >= state.teams.length ? "hidden" : ""}><input type="checkbox" name="autoTeam_${index}" ${isAutoTeam(team) ? "checked" : ""} /><i></i><span><strong data-auto-team-label>${escapeHtml(team?.manager || `Manager ${index + 1}`)}</strong><small>${escapeHtml(team?.name || `Team ${index + 1}`)}</small></span><b>AUTO</b></label>`;
+          }).join("")}
+        </div>
+      </fieldset>
       <div class="order-preview"><span>NOMINATION FLOW</span><strong>Top → bottom → repeat</strong></div>
     </section>
     <div class="dialog-actions">
@@ -386,8 +423,8 @@ function audioDialog() {
       }).join("")}
     </div></fieldset>
     <label class="audio-enabled-row"><span><strong>Auctioneer voice</strong><small>Keep announcements, countdowns, and rulings audible.</small></span><input name="enabled" type="checkbox" ${voiceEnabled ? "checked" : ""} /><b></b></label>
-    <label class="audio-enabled-row play-by-play-row"><span><strong>Continuous play-by-play</strong><small data-patter-provider-message>${escapeHtml(patterDirectorLabel())} Bids and rulings always interrupt.</small></span><input name="playByPlayEnabled" type="checkbox" ${auctioneerProfile.playByPlayEnabled ? "checked" : ""} /><b></b></label>
-    <label class="audio-enabled-row roast-enabled-row"><span><strong>Playful fantasy roasts</strong><small data-roast-provider-message>${escapeHtml(roastWriterLabel())} Roasts target bids and roster choices—not personal traits.</small></span><input name="roastingEnabled" type="checkbox" ${auctioneerProfile.roastingEnabled ? "checked" : ""} /><b></b></label>
+    <label class="audio-enabled-row play-by-play-row"><span><strong>Continuous play-by-play</strong><small data-patter-provider-message>${escapeHtml(patterDirectorLabel())} Bids wait for the current line; rulings interrupt.</small></span><input name="playByPlayEnabled" type="checkbox" ${auctioneerProfile.playByPlayEnabled ? "checked" : ""} /><b></b></label>
+    <label class="audio-enabled-row roast-enabled-row"><span><strong>Dark fantasy roasts</strong><small data-roast-provider-message>${escapeHtml(roastWriterLabel())} Dark, vulgar jokes target bids and draft decisions—not protected traits.</small></span><input name="roastingEnabled" type="checkbox" ${auctioneerProfile.roastingEnabled ? "checked" : ""} /><b></b></label>
     <fieldset class="audio-fieldset"><legend>PERSONALITY</legend><div class="personality-grid">
       ${Object.entries(AUCTIONEER_PERSONALITIES).map(([id, profile]) => `<label class="personality-option"><input type="radio" name="personality" value="${id}" ${auctioneerProfile.personality === id ? "checked" : ""} /><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.description)}</small></span><i>✓</i></label>`).join("")}
     </div></fieldset>
@@ -419,6 +456,7 @@ function wireGlobalEvents() {
   app.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
+    if (voiceEnabled) void auctioneerVoice.unlock();
     const action = button.dataset.action;
     try {
       if (action === "setup") {
@@ -446,7 +484,10 @@ function wireGlobalEvents() {
       if (action === "test-audio") return runAudioPreflight(button);
       if (action === "setup-next") {
         if (!validateSetupStep(setupStep)) return;
-        return showSetupStep(Math.min(3, setupStep + 1));
+        const nextStep = Math.min(3, setupStep + 1);
+        showSetupStep(nextStep);
+        if (nextStep === 3) syncAutodraftTeamSetup();
+        return;
       }
       if (action === "setup-back") return showSetupStep(Math.max(1, setupStep - 1));
       if (action === "resolve-visual-tie") return resolveVisualTie(button.dataset.teamId);
@@ -455,13 +496,18 @@ function wireGlobalEvents() {
       if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (action === "copy-phone-link") return copyPhoneJoinLink();
       if (action === "reset-phone-claims") return resetPhoneClaims();
-      if (action === "nominate") return update(nominatePlayer(state, button.dataset.playerId));
+      if (action === "nominate") return await selectNomination(button.dataset.playerId);
       if (action === "open") return beginAuction();
-      if (action === "pause") { clearTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
+      if (action === "pause") { clearTimer(); clearAutoDraftTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
       if (action === "advance") return runCountdownStep(true);
-      if (action === "next") return update(moveToNextPlayer(state));
+      if (action === "next") return await selectNextQueuedPlayer();
       if (action === "bid") return submitBid(button.dataset.teamId);
-      if (action === "undo") { clearTimer(); return update(undoLastSale(state), "Last sale reversed."); }
+      if (action === "undo") {
+        clearTimer();
+        clearAutoDraftTimer();
+        update(undoLastSale(state), "Last sale reversed.");
+        return await prepareAutoIntents();
+      }
       if (action === "results") return await openResultsPage();
       if (action === "load-fantasy-pros") return loadFantasyProsPreset();
       if (action === "import") return document.querySelector("#csv-input")?.click();
@@ -483,8 +529,8 @@ function wireGlobalEvents() {
   });
 
   app.addEventListener("input", (event) => {
-    if (event.target.id !== "player-search") return;
-    renderSearchResults(event.target.value);
+    if (event.target.id === "player-search") renderSearchResults(event.target.value);
+    if (event.target.name === "teamCount" || event.target.name === "teamNames") syncAutodraftTeamSetup();
   });
 
   app.addEventListener("submit", (event) => {
@@ -523,6 +569,7 @@ function wireGlobalEvents() {
         }));
         const imported = playersFromMappedCsv(pendingCsvImport?.rows || [], mapping);
         clearTimer();
+        clearAutoDraftTimer();
         stopAuctioneer();
         clearVisualBidWindow();
         pendingVisualTie = null;
@@ -538,6 +585,7 @@ function wireGlobalEvents() {
         });
         persistDraft();
         render();
+        scheduleAutoNomination();
         showNotice({ kind: "success", message: `Imported ${imported.length} players and reset the draft.` });
       } catch (error) {
         const errorNode = event.target.querySelector(".csv-form-error");
@@ -555,10 +603,20 @@ function wireGlobalEvents() {
     const benchSlots = Number(data.get("benchSlots")) || 0;
     const rosterSize = Object.values(rosterRequirements).reduce((sum, value) => sum + value, benchSlots);
     if (rosterSize < 1) return showNotice({ kind: "error", message: "Add at least one starting or bench roster slot." });
-    const teamLines = String(data.get("teamNames") || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    clearTimer();
+    clearAutoDraftTimer();
+    stopAuctioneer();
+    const teamLines = parseTeamSetupLines(data.get("teamNames"));
     const teams = makeTeams(teamCount, budget).map((team, index) => {
-      const [name, manager] = (teamLines[index] || "").split("|").map((part) => part?.trim());
-      return { ...team, name: name || team.name, manager: manager || team.manager };
+      const { name, manager } = teamLines[index] || {};
+      return {
+        ...team,
+        name: name || team.name,
+        manager: manager || team.manager,
+        controller: data.get(`autoTeam_${index}`) === "on"
+          ? { type: "auto", strategy: "balanced", aggressiveness: 1 }
+          : { type: "human", strategy: "balanced", aggressiveness: 1 }
+      };
     });
     const players = state.players.map((player) => ({ ...player, status: "available" }));
     state = createDraft({
@@ -576,6 +634,7 @@ function wireGlobalEvents() {
     document.querySelector("#setup-dialog")?.close();
     render();
     void initializePhoneRoom();
+    scheduleAutoNomination();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -591,22 +650,142 @@ function wireGlobalEvents() {
   });
 }
 
+async function selectNomination(playerId) {
+  clearTimer();
+  clearAutoDraftTimer();
+  autoIntentRequestSequence += 1;
+  update(nominatePlayer(state, playerId));
+  return await prepareAutoIntents();
+}
+
+async function selectNextQueuedPlayer() {
+  clearTimer();
+  clearAutoDraftTimer();
+  autoIntentRequestSequence += 1;
+  update(moveToNextPlayer(state));
+  return await prepareAutoIntents();
+}
+
+async function prepareAutoIntents() {
+  if (state.auction.phase !== "ready" || !state.auction.playerId) return;
+  const fallback = localAutoIntents(state);
+  const teamIds = Object.keys(fallback);
+  state = {
+    ...state,
+    auction: {
+      ...state.auction,
+      autoIntents: fallback,
+      autoIntentStatus: teamIds.length ? "pending" : "ready"
+    }
+  };
+  persistDraft();
+  render();
+  if (!teamIds.length) return;
+
+  const requestId = ++autoIntentRequestSequence;
+  const playerId = state.auction.playerId;
+  try {
+    const response = await fetch("/api/autodraft/intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: buildAutoIntentContext(state),
+        fallbackDecisions: Object.entries(fallback).map(([teamId, decision]) => ({ teamId, intent: decision.intent, reason: decision.reason }))
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "AI autodraft strategy is unavailable.");
+    if (requestId !== autoIntentRequestSequence || state.auction.playerId !== playerId || state.auction.phase !== "ready") return;
+    state = {
+      ...state,
+      auction: {
+        ...state.auction,
+        autoIntents: normalizeAutoIntents(state, payload.decisions, { provider: payload.provider, model: payload.model }),
+        autoIntentStatus: "ready"
+      }
+    };
+    persistDraft();
+    render();
+  } catch {
+    if (requestId !== autoIntentRequestSequence || state.auction.playerId !== playerId || state.auction.phase !== "ready") return;
+    state = { ...state, auction: { ...state.auction, autoIntentStatus: "ready" } };
+    persistDraft();
+    render();
+  }
+}
+
+function freezeLocalAutoIntents() {
+  if (!state.auction.playerId || state.auction.autoIntentStatus === "ready") return;
+  autoIntentRequestSequence += 1;
+  state = {
+    ...state,
+    auction: {
+      ...state.auction,
+      autoIntents: localAutoIntents(state),
+      autoIntentStatus: "ready"
+    }
+  };
+}
+
+function scheduleAutoDraftBid() {
+  clearAutoDraftTimer();
+  if (pendingVisualTie || visualBidWindow) return;
+  const decision = chooseAutoBid(state);
+  if (!decision) return;
+  autoDraftTimer = window.setTimeout(() => {
+    autoDraftTimer = null;
+    if (pendingVisualTie || visualBidWindow) return resumeAuctionFlow();
+    const latest = chooseAutoBid(state);
+    if (!latest) return;
+    try { submitBid(latest.teamId, latest.amount, { source: "auto" }); }
+    catch { resumeAuctionFlow(); }
+  }, autoBidDelayMs(state, decision.teamId));
+}
+
+function scheduleAutoNomination() {
+  clearAutoDraftTimer();
+  if (!["idle", "sold", "passed"].includes(state.auction.phase)) return;
+  const nominator = currentNominator(state);
+  if (!nominator || !isAutoTeam(nominator)) return;
+  const playerId = chooseAutoNomination(state, nominator.id);
+  if (!playerId) return;
+  autoDraftTimer = window.setTimeout(async () => {
+    autoDraftTimer = null;
+    const current = currentNominator(state);
+    if (!["idle", "sold", "passed"].includes(state.auction.phase) || current?.id !== nominator.id) return;
+    try {
+      await selectNomination(playerId);
+    } catch (error) {
+      showNotice({ kind: "error", message: error.message });
+    }
+  }, 900);
+}
+
+function clearAutoDraftTimer() {
+  if (autoDraftTimer) window.clearTimeout(autoDraftTimer);
+  autoDraftTimer = null;
+}
+
 function beginAuction() {
   clearTimer();
+  clearAutoDraftTimer();
   clearPatter();
   clearVisualBidWindow();
   pendingVisualTie = null;
+  freezeLocalAutoIntents();
   state = openAuction(state);
   persistDraft();
   render();
   const player = currentPlayer(state);
-  speak(auctioneerScript.nomination(player), resumeAuctionFlow, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
+  speak(auctioneerScript.nomination(player), null, { style: "nomination", priority: SPEECH_PRIORITY.nomination });
+  resumeAuctionFlow();
 }
 
 function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   const input = document.querySelector("#manual-amount");
   const amount = bidAmount ?? (input ? Number(input.value) : null);
   clearTimer();
+  clearAutoDraftTimer();
   clearPatter();
   clearVisualBidWindow();
   pendingVisualTie = null;
@@ -615,22 +794,31 @@ function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   render();
   const team = state.teams.find((item) => item.id === teamId);
   const next = state.auction.amount + state.config.increment;
-  speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), resumeAuctionFlow, {
+  speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), null, {
     style: "bid",
-    priority: SPEECH_PRIORITY.bid
+    priority: SPEECH_PRIORITY.bid,
+    interrupt: false,
+    queueKey: "live-bid"
   });
+  resumeAuctionFlow();
 }
 
 function runCountdownStep(force = false) {
   if (!force && (pendingVisualTie || visualBidWindow)) return;
   clearTimer();
+  clearAutoDraftTimer();
   clearPatter();
   const before = state.auction.phase;
   state = advanceCountdown(state);
   persistDraft();
   render();
-  if (state.auction.phase === "once") speak(auctioneerScript.goingOnce(state.auction.amount), resumeAuctionFlow, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
-  else if (state.auction.phase === "twice") speak(auctioneerScript.goingTwice(state.auction.amount), resumeAuctionFlow, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+  if (state.auction.phase === "once") {
+    speak(auctioneerScript.goingOnce(state.auction.amount), null, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+    resumeAuctionFlow();
+  } else if (state.auction.phase === "twice") {
+    speak(auctioneerScript.goingTwice(state.auction.amount), null, { style: "countdown", priority: SPEECH_PRIORITY.countdown });
+    resumeAuctionFlow();
+  }
   else if (state.auction.phase === "sold") {
     const player = currentPlayer(state);
     const team = state.teams.find((item) => item.id === state.auction.highBidderId);
@@ -639,8 +827,10 @@ function runCountdownStep(force = false) {
     speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), () => {
       void maybeSpeakSaleRoast(sale?.id, context);
     }, { style: "sold", priority: SPEECH_PRIORITY.sold });
+    scheduleAutoNomination();
   } else if (state.auction.phase === "passed" && before === "open") {
     speak(auctioneerScript.passed(currentPlayer(state)), null, { style: "passed", priority: SPEECH_PRIORITY.sold });
+    scheduleAutoNomination();
   }
 }
 
@@ -653,6 +843,7 @@ function scheduleCountdown() {
 
 function resumeAuctionFlow() {
   scheduleCountdown();
+  scheduleAutoDraftBid();
   void refillPatterQueue();
   schedulePatter();
 }
@@ -694,10 +885,14 @@ function speakPatter() {
     phase: state.auction.phase,
     suggestedValue: Number(player.suggestedValue) || 0
   });
-  const line = patterQueue.shift() || localLine();
-  recentPatterLines = [...recentPatterLines.slice(-7), line];
+  const passageCandidates = patterQueue.length
+    ? patterQueue.splice(0, patterQueue.length)
+    : Array.from({ length: LOCAL_PATTER_PASSAGE_LINES }, localLine);
+  const passage = buildPatterPassage(passageCandidates);
+  if (!passage.text) return schedulePatter();
+  recentPatterLines = [...recentPatterLines, ...passage.lines].slice(-8);
   if (patterQueue.length <= 1) void refillPatterQueue();
-  speak(line, schedulePatter, { style: "patter", priority: SPEECH_PRIORITY.patter });
+  speak(passage.text, schedulePatter, { style: "patter", priority: SPEECH_PRIORITY.patter });
 }
 
 async function refillPatterQueue() {
@@ -781,11 +976,13 @@ function clearPatter() {
   patterTimer = null;
 }
 
-function speak(text, onDone, { style = "neutral", priority = 0 } = {}) {
+function speak(text, onDone, { style = "neutral", priority = 0, interrupt = true, queueKey = null } = {}) {
   if (!voiceEnabled) { onDone?.(); return; }
   auctioneerVoice.speak(text, {
     style,
     priority,
+    interrupt,
+    queueKey,
     personality: auctioneerProfile.personality,
     energy: auctioneerProfile.energy,
     onDone
@@ -818,7 +1015,12 @@ function saleRoastContext(player, team, amount) {
 }
 
 async function maybeSpeakSaleRoast(saleId, context) {
-  if (!saleId || !voiceEnabled || !auctioneerProfile.roastingEnabled) return;
+  if (
+    !saleId
+    || !voiceEnabled
+    || !auctioneerProfile.roastingEnabled
+    || !shouldRoastSale(context)
+  ) return;
   try {
     const response = await fetch("/api/auctioneer/roast", {
       method: "POST",
@@ -832,7 +1034,7 @@ async function maybeSpeakSaleRoast(saleId, context) {
     const payload = await response.json().catch(() => ({}));
     const saleStillCurrent = state.auction.phase === "sold" && state.sales.at(-1)?.id === saleId;
     if (!response.ok || !saleStillCurrent || !voiceEnabled || !auctioneerProfile.roastingEnabled || !payload.text) return;
-    recentRoasts = [...recentRoasts.slice(-4), String(payload.text)];
+    recentRoasts = [...recentRoasts, String(payload.text)].slice(-20);
     speak(payload.text, null, { style: "roast", priority: SPEECH_PRIORITY.roast });
   } catch {}
 }
@@ -848,6 +1050,7 @@ async function runAudioPreflight(button) {
   clearPatter();
   button.disabled = true;
   if (check) check.textContent = "Lucy is speaking now…";
+  await auctioneerVoice.unlock();
   await auctioneerVoice.setProvider(provider);
   const previewScript = createAuctioneerScript({ personality });
   auctioneerVoice.speak(previewScript.preflight(), {
@@ -872,8 +1075,8 @@ function updateAudioServiceStatus() {
   card?.classList.toggle("is-fallback", auctioneerService.provider === "browser");
   if (label) label.textContent = audioProviderLabel();
   if (message) message.textContent = auctioneerService.message;
-  if (roastMessage) roastMessage.textContent = `${roastWriterLabel()} Roasts target bids and roster choices—not personal traits.`;
-  if (patterMessage) patterMessage.textContent = `${patterDirectorLabel()} Bids and rulings always interrupt.`;
+  if (roastMessage) roastMessage.textContent = `${roastWriterLabel()} Dark, vulgar jokes target bids and draft decisions—not protected traits.`;
+  if (patterMessage) patterMessage.textContent = `${patterDirectorLabel()} Bids wait for the current line; rulings interrupt.`;
 }
 
 function stopAuctioneer() {
@@ -987,7 +1190,13 @@ async function initializePhoneRoom() {
     const snapshot = await postPhoneJson("/api/phone-room/upsert", {
       roomId: phoneRoom.roomId,
       hostKey: phoneRoom.hostKey,
-      teams: state.teams.map((team) => ({ id: team.id, name: team.name, manager: team.manager, color: team.color }))
+      teams: state.teams.map((team) => ({
+        id: team.id,
+        name: team.name,
+        manager: team.manager,
+        color: team.color,
+        autoDraft: isAutoTeam(team)
+      }))
     });
     applyPhoneRoomSnapshot(snapshot);
     connectPhoneRoomEvents();
@@ -1135,6 +1344,7 @@ async function openResultsPage() {
 
 function loadFantasyProsPreset() {
   clearTimer();
+  clearAutoDraftTimer();
   stopAuctioneer();
   clearVisualBidWindow();
   pendingVisualTie = null;
@@ -1149,6 +1359,7 @@ function loadFantasyProsPreset() {
   });
   persistDraft();
   render();
+  scheduleAutoNomination();
   showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} FantasyPros players and auction values. The draft is ready.` });
 }
 
@@ -1236,8 +1447,9 @@ function restoreDraft() {
       ...restored.config,
       rosterRequirements: Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(restored.config?.rosterRequirements?.[position]) || 0]))
     };
+    restored.teams = (restored.teams || []).map((team) => ({ ...team, controller: autoTeamController(team.controller) }));
     restored.nomination ||= { order: restored.teams.map((team) => team.id), currentIndex: 0 };
-    restored.auction = { nominatorTeamId: null, ...restored.auction };
+    restored.auction = { nominatorTeamId: null, autoIntents: {}, autoIntentStatus: "idle", ...restored.auction };
     return restored;
   } catch { return null; }
 }
@@ -1264,6 +1476,22 @@ function orderedTeamsForSetup() {
   const byId = new Map(state.teams.map((team) => [team.id, team]));
   const ordered = (state.nomination?.order || []).map((id) => byId.get(id)).filter(Boolean);
   return [...ordered, ...state.teams.filter((team) => !ordered.includes(team))];
+}
+
+function syncAutodraftTeamSetup() {
+  const form = document.querySelector("#setup-form");
+  if (!form) return;
+  const count = Math.min(12, Math.max(2, Number(form.elements.teamCount?.value) || state.teams.length));
+  const teams = parseTeamSetupLines(form.elements.teamNames?.value);
+  form.querySelectorAll("[data-auto-team-slot]").forEach((slot) => {
+    const index = Number(slot.dataset.autoTeamSlot);
+    slot.hidden = index >= count;
+    const { name, manager } = teams[index] || {};
+    const strong = slot.querySelector("strong");
+    const small = slot.querySelector("small");
+    if (strong) strong.textContent = manager || `Manager ${index + 1}`;
+    if (small) small.textContent = name || `Team ${index + 1}`;
+  });
 }
 
 function validateSetupStep(step) {

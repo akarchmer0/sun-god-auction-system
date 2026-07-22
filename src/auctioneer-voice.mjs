@@ -10,6 +10,7 @@ export class AuctioneerVoice {
     UtteranceImpl = globalThis.SpeechSynthesisUtterance,
     provider = "auto",
     streamTimeoutMs = 4_500,
+    playbackCompletionGraceMs = 300,
     onStatusChange = () => {}
   } = {}) {
     this.endpoint = endpoint;
@@ -20,9 +21,12 @@ export class AuctioneerVoice {
     this.UtteranceImpl = UtteranceImpl;
     this.providerPreference = SPEECH_PROVIDER_IDS.includes(provider) ? provider : "auto";
     this.streamTimeoutMs = streamTimeoutMs;
+    this.playbackCompletionGraceMs = playbackCompletionGraceMs;
     this.onStatusChange = onStatusChange;
     this.audioContext = null;
     this.active = null;
+    this.queue = [];
+    this.queueSequence = 0;
     this.status = { status: "checking", available: null, provider: "browser", requestedProvider: this.providerPreference, message: "Checking realtime voice providers." };
   }
 
@@ -49,31 +53,79 @@ export class AuctioneerVoice {
     return Boolean(this.active);
   }
 
-  speak(text, { style = "neutral", priority = 0, personality = "classic", energy = 2, onDone } = {}) {
+  async unlock() {
+    if (!this.AudioContextImpl) return false;
+    try {
+      if (!this.audioContext) this.audioContext = new this.AudioContextImpl();
+      if (this.audioContext.state === "suspended" && typeof this.audioContext.resume === "function") {
+        await this.audioContext.resume();
+      }
+      return this.audioContext.state !== "suspended";
+    } catch {
+      return false;
+    }
+  }
+
+  speak(text, {
+    style = "neutral",
+    priority = 0,
+    personality = "classic",
+    energy = 2,
+    interrupt = true,
+    queueKey = null,
+    onDone
+  } = {}) {
     const transcript = String(text || "").trim();
     if (!transcript) { onDone?.(); return; }
-    this.cancel();
+    const request = {
+      transcript,
+      performance: { style, personality, energy },
+      priority: Number(priority) || 0,
+      queueKey: queueKey ? String(queueKey) : null,
+      sequence: this.queueSequence += 1,
+      onDone
+    };
+    if (this.active && !interrupt) {
+      this.#enqueue(request);
+      return;
+    }
+    if (this.active || this.queue.length) this.cancel();
+    this.#start(request);
+  }
+
+  #start(request) {
     const active = {
       id: Symbol("auctioneer-speech"),
-      priority,
-      onDone,
+      priority: request.priority,
+      onDone: request.onDone,
       abortController: new AbortController(),
       sources: new Set(),
       pendingSources: 0,
       streamDone: false,
       playedAudio: false,
       finished: false,
-      nextStartTime: 0
+      nextStartTime: 0,
+      completionTimer: null
     };
     this.active = active;
     if (this.status.available === false || !this.AudioContextImpl) {
-      this.#speakWithBrowser(transcript, active, { style, personality, energy });
+      this.#speakWithBrowser(request.transcript, active, request.performance);
       return;
     }
-    void this.#streamRealtime(transcript, { style, personality, energy }, active);
+    void this.#streamRealtime(request.transcript, request.performance, active);
+  }
+
+  #enqueue(request) {
+    if (request.queueKey) {
+      const existingIndex = this.queue.findIndex((item) => item.queueKey === request.queueKey);
+      if (existingIndex >= 0) this.queue.splice(existingIndex, 1);
+    }
+    this.queue.push(request);
+    this.queue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence);
   }
 
   cancel() {
+    this.queue = [];
     const active = this.active;
     if (!active) {
       this.speechSynthesis?.cancel();
@@ -81,6 +133,7 @@ export class AuctioneerVoice {
     }
     this.active = null;
     active.finished = true;
+    if (active.completionTimer) clearTimeout(active.completionTimer);
     active.abortController.abort();
     for (const source of active.sources) {
       try { source.stop(); } catch {}
@@ -129,7 +182,16 @@ export class AuctioneerVoice {
     if (this.active !== active) return;
     if (event.type === "start") {
       active.sampleRate = Number(event.sampleRate) || 24_000;
-      if (event.provider && this.status.provider !== event.provider) this.#setStatus({ status: "ready", available: true, provider: event.provider });
+      if (event.provider && (this.status.provider !== event.provider || event.fallbackFrom)) {
+        this.#setStatus({
+          status: "ready",
+          available: true,
+          provider: event.provider,
+          message: event.fallbackFrom
+            ? `${event.fallbackFrom} returned no audio; ${event.provider} fallback is active.`
+            : this.status.message
+        });
+      }
       return;
     }
     if (event.type === "audio" && event.data) {
@@ -168,7 +230,18 @@ export class AuctioneerVoice {
   }
 
   #finishWhenAudioEnds(active) {
-    if (active.streamDone && active.pendingSources === 0) this.#finish(active);
+    if (!active.streamDone) return;
+    if (active.pendingSources === 0) {
+      this.#finish(active);
+      return;
+    }
+    if (active.completionTimer || this.active !== active) return;
+    const now = Number(this.audioContext?.currentTime) || 0;
+    const remainingPlaybackMs = Math.max(0, ((active.nextStartTime || now) - now) * 1_000);
+    active.completionTimer = setTimeout(() => {
+      active.completionTimer = null;
+      this.#finish(active);
+    }, remainingPlaybackMs + this.playbackCompletionGraceMs);
   }
 
   #speakWithBrowser(transcript, active, { style = "neutral", personality = "classic", energy = 2 } = {}) {
@@ -192,7 +265,11 @@ export class AuctioneerVoice {
   #finish(active) {
     if (active.finished || this.active !== active) return;
     active.finished = true;
+    if (active.completionTimer) clearTimeout(active.completionTimer);
+    active.completionTimer = null;
     this.active = null;
+    const next = this.queue.shift();
+    if (next) this.#start(next);
     active.onDone?.();
   }
 

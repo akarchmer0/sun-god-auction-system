@@ -187,7 +187,7 @@ function renderError() {
 function renderTeamChoice() {
   renderShell(`<section class="team-choice">
     <span class="kicker">ROOM ${escapeHtml(roomId)}</span><h1>Who are you?</h1><p>Choose your team. One phone can control each team.</p>
-    <div class="phone-team-list">${room.teams.map((team) => `<button data-action="claim" data-team-id="${escapeHtml(team.id)}" ${team.claimed ? "disabled" : ""}><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${escapeHtml(team.name)}</small></span><b>${team.claimed ? "JOINED" : "SELECT"}</b></button>`).join("")}</div>
+    <div class="phone-team-list">${room.teams.map((team) => `<button data-action="claim" data-team-id="${escapeHtml(team.id)}" ${team.claimed || team.autoDraft ? "disabled" : ""}><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${escapeHtml(team.name)}</small></span><b>${team.autoDraft ? "AUTO" : team.claimed ? "JOINED" : "SELECT"}</b></button>`).join("")}</div>
     <button class="link-button" data-action="change-code">Use another room code</button>
   </section>`);
 }

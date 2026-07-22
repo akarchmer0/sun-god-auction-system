@@ -76,25 +76,33 @@ export class ElevenLabsSpeechService {
     const socket = await this.#connect();
     const contextId = this.createId();
     let settled = false;
+    let closeSent = false;
     let resolveDone;
     let rejectDone;
     const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+    const closeContext = () => {
+      if (closeSent) return;
+      closeSent = true;
+      if (socket.readyState === 1) {
+        try { socket.send(JSON.stringify({ context_id: contextId, close_context: true })); } catch {}
+      }
+    };
     const finish = (error) => {
       if (settled) return;
       settled = true;
+      closeContext();
       this.contexts.delete(contextId);
       if (error) rejectDone(error);
       else resolveDone();
     };
-    const context = { onEvent, finish, cancelled: false };
+    const context = { onEvent, finish, cancelled: false, receivedAudio: false };
     this.contexts.set(contextId, context);
 
     try {
-      socket.send(JSON.stringify(buildElevenLabsGeneration({ contextId, transcript: text, style, personality, energy })));
-      socket.send(JSON.stringify({ context_id: contextId, flush: true }));
-      // Multi-context streams emit their final event only after the context is closed.
-      // Closing after flush still delivers all buffered audio and keeps the shared socket warm.
-      socket.send(JSON.stringify({ context_id: contextId, close_context: true }));
+      const generation = buildElevenLabsGeneration({ contextId, transcript: text, style, personality, energy });
+      socket.send(JSON.stringify({ ...generation, text: " " }));
+      socket.send(JSON.stringify({ context_id: contextId, text: generation.text, flush: true }));
+      closeContext();
     } catch (error) {
       this.contexts.delete(contextId);
       settled = true;
@@ -108,9 +116,7 @@ export class ElevenLabsSpeechService {
       cancel: () => {
         if (settled) return;
         context.cancelled = true;
-        if (this.socket?.readyState === 1) {
-          try { this.socket.send(JSON.stringify({ context_id: contextId, close_context: true })); } catch {}
-        }
+        closeContext();
         finish();
       }
     };
@@ -196,13 +202,18 @@ export class ElevenLabsSpeechService {
     const contextId = event.contextId || event.context_id;
     const context = this.contexts.get(contextId);
     if (!context || context.cancelled) return;
-    if (event.audio) context.onEvent?.({ type: "audio", data: event.audio });
+    if (event.audio) {
+      context.receivedAudio = true;
+      context.onEvent?.({ type: "audio", data: event.audio });
+    }
     if (event.error || event.message?.type === "error") {
       context.finish(serviceError(event.error || event.message?.message || "ElevenLabs could not generate that announcement.", 502));
       return;
     }
     if (event.is_final === true || event.isFinal === true) {
-      context.finish();
+      context.finish(context.receivedAudio
+        ? null
+        : serviceError("ElevenLabs returned no audio. Check the account credits and voice access.", 503));
     }
   }
 

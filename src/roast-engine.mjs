@@ -12,10 +12,19 @@ export const ROAST_REFERENCE_LINES = Object.freeze([
 ]);
 
 const PERSONALITY_TONE = Object.freeze({
-  classic: "dry, quick, and mischievous",
-  hype: "high-energy, theatrical, and punchy",
-  pro: "deadpan, analytical, and cutting"
+  classic: "dry, dark, vulgar, and genuinely cutting",
+  hype: "high-energy, theatrical, dark, and viciously punchy",
+  pro: "deadpan, profane when useful, and brutally analytical"
 });
+
+export function shouldRoastSale({ amount, suggestedValue } = {}) {
+  const paid = Number(amount);
+  const suggested = Number(suggestedValue);
+  return Number.isFinite(paid)
+    && Number.isFinite(suggested)
+    && suggested >= 0
+    && paid > suggested;
+}
 
 export function normalizeRoastContext(value = {}) {
   const roster = Array.isArray(value.roster) ? value.roster.slice(0, 18).map((spot) => ({
@@ -46,7 +55,14 @@ export function normalizeRoastContext(value = {}) {
 }
 
 export function buildRoastInstructions({ personality = "classic", referenceIndex = 0 } = {}) {
-  const selected = ROAST_REFERENCE_LINES[wrapIndex(referenceIndex, ROAST_REFERENCE_LINES.length)];
+  const hasAssignedReference = Number.isInteger(referenceIndex)
+    && referenceIndex >= 0
+    && referenceIndex < ROAST_REFERENCE_LINES.length;
+  const assignment = hasAssignedReference
+    ? `- This selected reference is the rotation assignment: ${ROAST_REFERENCE_LINES[referenceIndex]}
+- Preserve its core joke, darkness, and comic rhythm. Prefer a close contextual adaptation over a safer rewrite.`
+    : `- The initial reference assignments have all been used. Invent a genuinely new dark premise and punchline from the live auction context.
+- Do not recycle, paraphrase, or merely swap names into any reference below. Match their bite, not their wording or joke structure.`;
   return `You write one live fantasy-football auction roast for an auctioneer named Lucy.
 
 Outcome:
@@ -54,18 +70,18 @@ Outcome:
 - Keep it under 28 words and make it ${PERSONALITY_TONE[personality] || PERSONALITY_TONE.classic}.
 - Roast the bid, price, roster construction, or fantasy-football reasoning—not the person's identity.
 - Use the supplied manager, player, dollar amount, position, suggested value, or roster context when useful.
+- The room explicitly wants dark comedy. Profanity, vulgarity, and obvious hyperbole about death, drugs, injury, incompetence, and financial ruin are allowed and encouraged when they sharpen the joke.
+- Be funny before being polite. Do not sanitize the selected reference, replace its dark premise with a wholesome one, or add a moral disclaimer.
 
 Reference rotation:
-- This selected reference is the rotation assignment: ${selected}
-- Preserve its core joke or comic rhythm. Only replace its premise when the truth constraints make that premise unsupported by the live context.
+${assignment}
 - Adjust names, pronouns, dollar amounts, and football details to the live context.
-- The full house style appears below. Echo or remix it; do not explain it.
+- The full house style appears below. Use it as the comedy calibration; do not explain it.
 ${ROAST_REFERENCE_LINES.map((line, index) => `${index + 1}. ${line}`).join("\n")}
 
-Truth and taste constraints:
-- Do not invent an injury, rookie status, ADP, coach quote, depth-chart relationship, or news fact. If a selected reference depends on a fact not supplied, preserve its comic rhythm but replace that premise with supplied facts.
-- Fantasy-football hyperbole from the references is allowed, but never present a real medical, drug, death, or injury claim as fact.
-- No slurs, protected-trait jokes, appearance jokes, threats, sexual content, or attacks on someone's real life. Keep the target inside this fantasy draft.
+Factual boundary:
+- Do not invent actual news, injuries, rookie status, ADP, coach quotes, or depth-chart facts about a real player. When those ideas appear in a reference, frame them as unmistakable comic exaggeration or metaphor without reducing the bite.
+- Never use slurs or protected traits as the joke. Everything else may be fair game when aimed at the bid, roster, strategy, or manager's fantasy-football judgment.
 - Avoid repeating any recent roast supplied in the input.`;
 }
 
@@ -73,7 +89,7 @@ export function buildRoastInput(context, recentRoasts = []) {
   return JSON.stringify({
     auctionContext: normalizeRoastContext(context),
     recentRoasts: Array.isArray(recentRoasts)
-      ? recentRoasts.slice(-5).map((line) => cleanText(line, 240)).filter(Boolean)
+      ? recentRoasts.slice(-20).map((line) => cleanText(line, 240)).filter(Boolean)
       : []
   });
 }
@@ -90,16 +106,16 @@ export function curatedRoast(context, referenceIndex = 0) {
   const lines = [
     `${manager} is spending like they've got the answers and drafting like they've got a concussion.`,
     `${player} at ${amount}? That's not a sleeper, that's a coma patient.`,
-    `${manager} drafts roster insurance like they're trying to collect on the policy.`,
+    `${manager} drafts handcuffs like they're hoping the starter dies.`,
     value.hasSuggestedValue
-      ? `The ${value.suggestedValue}-dollar suggestion was higher than the logic behind this ${amount} bid.`
-      : `The draft board had more value before this ${amount} bid showed up.`,
+      ? `That ${amount} bid is higher than ${manager} was when they ignored the ${value.suggestedValue}-dollar suggestion.`
+      : `That ${amount} bid is higher than ${manager} was when they made it.`,
     `${amount} on a ${position}? Your league fees are basically a donation.`,
-    `You built a whole strategy around ${player}, and the strategy already needs crutches.`,
+    `You built a whole strategy around ${player}, and the strategy needs a walking boot and last rites.`,
     `${value.fantasyTeamName}'s identity is “guys whose names sound familiar.”`,
     `That bid had the confidence of a manager who did zero research and one podcast.`,
-    `${player}'s ceiling is another player's floor, and ${manager} just paid ${amount} for the elevator.`,
-    `You just spent ${overpay}. Even the draft board is asking who the other guy was.`
+    `${player}'s ceiling is another guy's floor, and that guy went undrafted.`,
+    `You just spent ${overpay}. Even the depth chart calls him “the other guy.”`
   ];
   return lines[wrapIndex(referenceIndex, lines.length)];
 }

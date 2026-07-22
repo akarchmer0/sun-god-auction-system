@@ -45,13 +45,15 @@ export class OpenAIRoastService {
 
   async createRoast({ context, recentRoasts = [], personality = "classic" } = {}) {
     const normalized = normalizeRoastContext(context);
-    const referenceIndex = this.referenceCursor;
-    this.referenceCursor = (this.referenceCursor + 1) % ROAST_REFERENCE_LINES.length;
+    const roastIndex = this.referenceCursor;
+    const referenceIndex = roastIndex < ROAST_REFERENCE_LINES.length ? roastIndex : null;
+    const fallbackIndex = roastIndex % ROAST_REFERENCE_LINES.length;
+    this.referenceCursor += 1;
     const fallback = () => ({
-      text: curatedRoast(normalized, referenceIndex),
+      text: curatedRoast(normalized, fallbackIndex),
       provider: "curated",
       model: null,
-      referenceIndex
+      referenceIndex: fallbackIndex
     });
     if (!this.status().available) return fallback();
 

@@ -67,12 +67,15 @@ test("ElevenLabs keeps one multi-context socket warm across utterances", async (
   const audio = [];
   const first = await service.createSpeech({ transcript: "Going once", onEvent: (event) => audio.push(event) });
   assert.deepEqual(FakeWebSocket.instance.sent.slice(0, 3).map((message) => message.context_id), ["context-1", "context-1", "context-1"]);
+  assert.equal(FakeWebSocket.instance.sent[0].text, " ");
+  assert.equal(FakeWebSocket.instance.sent[1].text, "Going once ");
   assert.equal(FakeWebSocket.instance.sent[1].flush, true);
   assert.equal(FakeWebSocket.instance.sent[2].close_context, true);
   FakeWebSocket.instance.emit("message", { data: JSON.stringify({ contextId: "context-1", audio: "AAAA", is_final: false }) });
   FakeWebSocket.instance.emit("message", { data: JSON.stringify({ contextId: "context-1", is_final: true }) });
   await first.done;
   assert.deepEqual(audio, [{ type: "audio", data: "AAAA" }]);
+  assert.equal(FakeWebSocket.instance.sent.filter((message) => message.context_id === "context-1" && message.close_context === true).length, 1);
 
   const second = await service.createSpeech({ transcript: "New bid" });
   second.cancel();
@@ -86,4 +89,36 @@ test("ElevenLabs is unavailable until both a key and voice ID are configured", (
   const missingVoice = new ElevenLabsSpeechService({ apiKey: "key", voiceId: "" });
   assert.equal(missingVoice.status().available, false);
   assert.match(missingVoice.status().message, /VOICE_ID/);
+});
+
+test("ElevenLabs rejects an empty final event so Auto can try another provider", async () => {
+  class FakeWebSocket {
+    static instance;
+    constructor() {
+      this.readyState = 0;
+      this.listeners = new Map();
+      FakeWebSocket.instance = this;
+      queueMicrotask(() => { this.readyState = 1; this.emit("open", {}); });
+    }
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+    send() {}
+    emit(type, event) { for (const listener of this.listeners.get(type) || []) listener(event); }
+  }
+  const service = new ElevenLabsSpeechService({
+    apiKey: "out-of-credit-key",
+    voiceId: "auction-voice",
+    fetchImpl: async () => ({ ok: true, json: async () => ({ token: "single-use-token" }) }),
+    WebSocketImpl: FakeWebSocket,
+    createId: () => "empty-context"
+  });
+
+  const speech = await service.createSpeech({ transcript: "Going once" });
+  FakeWebSocket.instance.emit("message", {
+    data: JSON.stringify({ contextId: "empty-context", audio: "", isFinal: true })
+  });
+  await assert.rejects(speech.done, /returned no audio.*credits/i);
 });

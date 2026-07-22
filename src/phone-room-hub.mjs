@@ -23,7 +23,7 @@ export class PhoneRoomHub {
       auction: null,
       createdAt: this.now()
     };
-    const validTeamIds = new Set(cleanTeams.map((team) => team.id));
+    const validTeamIds = new Set(cleanTeams.filter((team) => !team.autoDraft).map((team) => team.id));
     for (const teamId of room.claims.keys()) {
       if (!validTeamIds.has(teamId)) room.claims.delete(teamId);
     }
@@ -54,7 +54,9 @@ export class PhoneRoomHub {
   claimTeam({ roomId, teamId, participantToken }) {
     const room = this.requireRoom(roomId);
     requireToken(participantToken, "participant token");
-    if (!room.teams.some((team) => team.id === teamId)) throw roomError("Choose a valid team.", 400);
+    const team = room.teams.find((item) => item.id === teamId);
+    if (!team) throw roomError("Choose a valid team.", 400);
+    if (team.autoDraft) throw roomError("That team is controlled by auto draft.", 409);
     const existing = room.claims.get(teamId);
     if (existing && existing !== participantToken) throw roomError("That team is already connected to another phone.", 409);
 
@@ -178,7 +180,8 @@ function normalizeTeams(teams) {
     id: cleanText(team?.id, 80) || `team-${index + 1}`,
     name: cleanText(team?.name, 100) || `Team ${index + 1}`,
     manager: cleanText(team?.manager, 100) || `Manager ${index + 1}`,
-    color: /^#[0-9a-f]{6}$/i.test(team?.color) ? team.color : "#d39a20"
+    color: /^#[0-9a-f]{6}$/i.test(team?.color) ? team.color : "#d39a20",
+    autoDraft: team?.autoDraft === true
   }));
   if (new Set(clean.map((team) => team.id)).size !== clean.length) throw roomError("Every team needs a unique ID.", 400);
   return clean;

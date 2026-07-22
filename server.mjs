@@ -11,6 +11,7 @@ import { speechProviderCandidates, speechProviderStatus } from "./src/auctioneer
 import { SpeechAudioCache, countdownCacheKey } from "./src/speech-cache.mjs";
 import { OpenAIRoastService } from "./src/openai-roast-service.mjs";
 import { OpenAIPatterService } from "./src/openai-patter-service.mjs";
+import { OpenAIAutodraftService } from "./src/openai-autodraft-service.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
@@ -33,6 +34,10 @@ const roastWriter = new OpenAIRoastService({
 const patterDirector = new OpenAIPatterService({
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_PATTER_MODEL
+});
+const autodraftDirector = new OpenAIAutodraftService({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: process.env.OPENAI_AUTODRAFT_MODEL
 });
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -57,7 +62,8 @@ const server = createServer(async (request, response) => {
         providers,
         countdownCacheEntries: speechAudioCache.size,
         roasting: roastWriter.status(),
-        patter: patterDirector.status()
+        patter: patterDirector.status(),
+        autodraft: autodraftDirector.status()
       });
     }
     if (request.method === "POST" && url.pathname === "/api/auctioneer/speech") {
@@ -81,6 +87,14 @@ const server = createServer(async (request, response) => {
         energy: Math.min(3, Math.max(1, Number(payload?.energy) || 2))
       });
       return sendJson(response, 200, patter);
+    }
+    if (request.method === "POST" && url.pathname === "/api/autodraft/intent") {
+      const payload = await readJsonRequest(request);
+      const result = await autodraftDirector.createIntents({
+        context: payload?.context,
+        fallbackDecisions: payload?.fallbackDecisions
+      });
+      return sendJson(response, 200, result);
     }
     if (request.method === "GET" && url.pathname === "/api/phone-room") {
       const room = phoneRoomHub.snapshot(url.searchParams.get("room"));
@@ -212,9 +226,6 @@ async function streamAuctioneerSpeech(request, response) {
   let completed = false;
   let cancelled = false;
   let speech;
-  let speechService;
-  let cacheKey;
-  const audioEvents = [];
   const cancel = () => {
     if (!completed) { cancelled = true; speech?.cancel(); }
   };
@@ -223,7 +234,9 @@ async function streamAuctioneerSpeech(request, response) {
 
   try {
     let lastError;
-    for (const candidate of speechCandidates) {
+    for (const [candidateIndex, candidate] of speechCandidates.entries()) {
+      const audioEvents = [];
+      let started = false;
       try {
         speech = await candidate.createSpeech({
           transcript: text,
@@ -231,27 +244,40 @@ async function streamAuctioneerSpeech(request, response) {
           personality,
           energy,
           onEvent: (event) => {
-            if (event.type === "audio" && event.data) audioEvents.push({ type: "audio", data: event.data });
+            if (event.type === "audio" && event.data) {
+              audioEvents.push({ type: "audio", data: event.data });
+              if (!started && !response.destroyed && !response.writableEnded) {
+                started = true;
+                response.write(`${JSON.stringify({
+                  type: "start",
+                  provider: candidate.status().provider,
+                  fallbackFrom: candidateIndex > 0 ? speechCandidates[0].status().provider : null,
+                  sampleRate: candidate.sampleRate,
+                  encoding: "pcm_s16le"
+                })}\n`);
+              }
+            }
             if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
           }
         });
-        speechService = candidate;
-        cacheKey = speechCacheKey(candidate, { text, style, personality, energy });
-        break;
+        await speech.done;
+        if (cancelled) return;
+        if (!audioEvents.length) throw apiError(`${candidate.status().provider} returned no audio.`, 503);
+        completed = true;
+        const cacheKey = speechCacheKey(candidate, { text, style, personality, energy });
+        if (cacheKey) speechAudioCache.set(cacheKey, { sampleRate: speech.sampleRate, events: audioEvents });
+        if (!response.destroyed && !response.writableEnded) {
+          response.write(`${JSON.stringify({ type: "done" })}\n`);
+          response.end();
+        }
+        return;
       } catch (error) {
         lastError = error;
-        if (requestedProvider !== "auto") throw error;
+        if (cancelled) return;
+        if (started || requestedProvider !== "auto") throw error;
       }
     }
-    if (!speech || !speechService) throw lastError || apiError("No realtime voice provider could start speech.", 503);
-    response.write(`${JSON.stringify({ type: "start", provider: speechService.status().provider, contextId: speech.contextId, sampleRate: speech.sampleRate, encoding: "pcm_s16le" })}\n`);
-    await speech.done;
-    completed = true;
-    if (cacheKey && !cancelled && audioEvents.length) speechAudioCache.set(cacheKey, { sampleRate: speech.sampleRate, events: audioEvents });
-    if (!response.destroyed && !response.writableEnded) {
-      response.write(`${JSON.stringify({ type: "done" })}\n`);
-      response.end();
-    }
+    throw lastError || apiError("No realtime voice provider could start speech.", 503);
   } catch (error) {
     completed = true;
     if (!response.destroyed && !response.writableEnded) {

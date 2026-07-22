@@ -22,6 +22,21 @@ test("a phone room assigns teams and prevents duplicate claims", () => {
   );
 });
 
+test("auto draft teams cannot be claimed from a phone", () => {
+  const hub = new PhoneRoomHub({ now: () => 1500 });
+  hub.upsertRoom({
+    roomId: "AUT222",
+    hostKey,
+    teams: [{ ...teams[0], autoDraft: true }, teams[1]]
+  });
+  assert.equal(hub.snapshot("AUT222").teams[0].autoDraft, true);
+  assert.throws(
+    () => hub.claimTeam({ roomId: "AUT222", teamId: "team-1", participantToken: phoneOne }),
+    /controlled by auto draft/
+  );
+  assert.equal(hub.claimTeam({ roomId: "AUT222", teamId: "team-2", participantToken: phoneOne }).claimedCount, 1);
+});
+
 test("phone bids use the server clock and require an open auction", () => {
   let now = 2000;
   const hub = new PhoneRoomHub({ now: () => now });

@@ -32,7 +32,9 @@ export function emptyAuction() {
     highBidderId: null,
     nominatorTeamId: null,
     bidCount: 0,
-    lastBidAt: null
+    lastBidAt: null,
+    autoIntents: {},
+    autoIntentStatus: "idle"
   };
 }
 

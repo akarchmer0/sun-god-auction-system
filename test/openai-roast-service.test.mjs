@@ -49,6 +49,26 @@ test("configured service calls the Responses API with a selected reference and l
   assert.match(result.text, /\$28 cry for help/);
 });
 
+test("configured service stops cycling references and requests original roasts after ten sales", async () => {
+  const instructions = [];
+  const service = new OpenAIRoastService({
+    apiKey: "test-key",
+    onError: () => {},
+    fetchImpl: async (_url, options) => {
+      instructions.push(JSON.parse(options.body).instructions);
+      return { ok: true, json: async () => ({ output_text: "A fresh dark roast from the live context." }) };
+    }
+  });
+  const results = [];
+  for (let index = 0; index < 12; index += 1) results.push(await service.createRoast({ context }));
+  assert.match(instructions[9], /selected reference is the rotation assignment/);
+  assert.match(instructions[10], /Invent a genuinely new dark premise and punchline/);
+  assert.match(instructions[11], /Invent a genuinely new dark premise and punchline/);
+  assert.equal(results[9].referenceIndex, 9);
+  assert.equal(results[10].referenceIndex, null);
+  assert.equal(results[11].referenceIndex, null);
+});
+
 test("API failures fall back to the selected curated line", async () => {
   const service = new OpenAIRoastService({
     apiKey: "test-key",
