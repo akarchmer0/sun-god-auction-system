@@ -433,7 +433,7 @@ function setupDialog() {
     <section class="setup-step ${setupStep === 3 ? "is-active" : ""}" data-setup-step="3">
       <p>Enter one team per line as <strong>Team name | Manager</strong>. This top-to-bottom list is the repeating nomination order.</p>
       <label class="team-name-field">Teams, managers, and order<textarea name="teamNames" rows="${Math.min(12, Math.max(4, state.teams.length))}" required>${escapeHtml(orderedTeams.map((team) => `${team.name} | ${team.manager}`).join("\n"))}</textarea></label>
-      <fieldset class="autodraft-team-fieldset"><legend>AUTO DRAFT CONTROL</legend><p>Marked teams cannot be claimed by a phone. AI chooses pass, value, or target once per nomination; local rules place every bid.</p>
+      <fieldset class="autodraft-team-fieldset"><legend>AUTO DRAFT CONTROL</legend><p>Marked teams cannot be claimed by a phone. AI chooses pass, discount, value, or target once per nomination; local rules place every bid.</p>
         <div class="autodraft-team-grid">
           ${Array.from({ length: 12 }, (_, index) => {
             const team = orderedTeams[index];

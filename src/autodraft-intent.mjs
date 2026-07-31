@@ -34,20 +34,21 @@ export function buildAutodraftInstructions() {
 Outcome:
 - Independently decide how interested each supplied auto team should be in the nominated player.
 - Return one decision for every supplied team, using exactly that team's teamId.
-- Use target when the player materially improves the team's construction and deserves its normal rules-based ceiling.
-- Use value when the team should participate only at a meaningful discount.
+- Use target when the team should pay a premium to pursue the player.
+- Use value when the player is worth approximately the supplied suggested value to the team.
+- Use discount when the team is interested only below the supplied suggested value.
 - Use pass when the team should stay silent for the entire lot.
 
 Decision criteria:
 - Consider roster construction, unfilled required positions, remaining slots, remaining budget, player suggested value, positional depth still available, and the recent auction market.
-- A team that is saturated at a position should usually pass, but may choose value for an exceptional bargain fit.
+- A team that is saturated at a position should usually pass, but may choose discount for an exceptional bargain fit.
 - Preserve enough flexibility and budget to complete a legal, balanced roster.
 - Treat each team independently even though all decisions are returned together.
 
 Constraints:
 - Use only the supplied JSON. Do not rely on external rankings, injuries, news, ADP, depth charts, or player knowledge.
-- Do not calculate or return a bid, price ceiling, explanation, confidence score, or any fields outside the schema.
-- The application owns bid legality, exact prices, timing, and all state changes.
+- Do not calculate or return a bid, maximum value, explanation, confidence score, or any fields outside the schema.
+- The application samples the private maximum value from the intent and owns bid legality, exact prices, timing, and all state changes.
 - Return only JSON matching the requested schema.`;
 }
 

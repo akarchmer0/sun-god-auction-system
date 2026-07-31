@@ -1,6 +1,6 @@
 import { canTeamRosterPlayer, maxBidForTeam, ROSTER_POSITIONS } from "./domain.mjs";
 
-export const AUTO_INTENTS = Object.freeze(["pass", "value", "target"]);
+export const AUTO_INTENTS = Object.freeze(["pass", "discount", "value", "target"]);
 export const AUTO_INTENT_REASONS = Object.freeze([
   "required_position",
   "roster_balance",
@@ -12,7 +12,12 @@ export const AUTO_INTENT_REASONS = Object.freeze([
 ]);
 
 const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
-const VALUE_DISCOUNT = 0.65;
+const INTENT_VALUE_MULTIPLIERS = Object.freeze({
+  discount: 0.9,
+  value: 1,
+  target: 1.1
+});
+const AUTO_BID_STANDARD_DEVIATION = 0.05;
 
 export function autoTeamController(controller) {
   return controller?.type === "auto"
@@ -57,7 +62,7 @@ export function localAutoIntent(state, teamId, playerId = state?.auction?.player
     return { intent: "pass", reason: "position_saturated" };
   }
   if (team.budget <= openSlots + Math.max(2, Math.round(Number(player.suggestedValue) * 0.3))) {
-    return { intent: "value", reason: "budget_preservation" };
+    return { intent: "discount", reason: "budget_preservation" };
   }
   return { intent: "value", reason: "value_opportunity" };
 }
@@ -70,19 +75,21 @@ export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction
   const normalizedIntent = AUTO_INTENTS.includes(intent) ? intent : localAutoIntent(state, teamId, playerId).intent;
   if (normalizedIntent === "pass") return 0;
 
-  const counts = rosterPositionCounts(state, team);
-  const position = normalizePosition(player.position);
-  const requirements = normalizedRequirements(state);
-  const positionNeed = Math.max(0, requirements[position] - (counts[position] || 0));
-  const flexNeed = FLEX_POSITIONS.has(position) ? missingFlexSlots(requirements, counts) : 0;
-  const needMultiplier = positionNeed > 0 || flexNeed > 0 ? 1.12 : repeatedPositionMultiplier(position, counts[position] || 0, requirements[position] || 0);
-  const marketMultiplier = recentMarketMultiplier(state);
-  const aggressiveness = autoTeamController(team.controller).aggressiveness;
-  const variation = deterministicMultiplier(`${team.id}:${player.id}`, 0.94, 1.06);
-  const suggestedValue = Math.max(1, wholeNumber(player.suggestedValue));
-  const intentMultiplier = normalizedIntent === "value" ? VALUE_DISCOUNT : 1;
-  const strategicValue = Math.max(1, Math.round(suggestedValue * needMultiplier * marketMultiplier * aggressiveness * variation * intentMultiplier));
-  return Math.min(maxBidForTeam(state, teamId), strategicValue);
+  const standardNormal = deterministicStandardNormal(
+    `${team.id}:${player.id}:${state.auction?.nominatorTeamId || ""}:${state.sales?.length || 0}:max-value`
+  );
+  return Math.min(
+    maxBidForTeam(state, teamId),
+    sampledAutoBidValue(player.suggestedValue, normalizedIntent, standardNormal)
+  );
+}
+
+export function sampledAutoBidValue(suggestedValue, intent, standardNormal = 0) {
+  if (intent === "pass" || !AUTO_INTENTS.includes(intent)) return 0;
+  const value = wholeNumber(suggestedValue);
+  const mean = value * INTENT_VALUE_MULTIPLIERS[intent];
+  const noise = value * AUTO_BID_STANDARD_DEVIATION * Number(standardNormal || 0);
+  return Math.max(0, Math.round(mean + noise));
 }
 
 export function chooseAutoBid(state) {
@@ -99,18 +106,9 @@ export function chooseAutoBid(state) {
   if (!candidates.length) return null;
   candidates.sort((a, b) => reactionScore(state, a.team.id) - reactionScore(state, b.team.id));
   const candidate = candidates[0];
-  const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
-  let amount = nextAmount;
-  if (isAutoTeam(highBidder)) {
-    const leaderIntent = intents[highBidder.id]?.intent || localAutoIntent(state, highBidder.id, playerId).intent;
-    const leaderCeiling = calculateAutoBidCeiling(state, highBidder.id, playerId, leaderIntent);
-    amount = candidate.ceiling > leaderCeiling
-      ? Math.min(candidate.ceiling, Math.max(nextAmount, leaderCeiling + Number(state.config.increment || 1)))
-      : candidate.ceiling;
-  }
   return {
     teamId: candidate.team.id,
-    amount,
+    amount: nextAmount,
     ceiling: candidate.ceiling,
     intent: candidate.intent
   };
@@ -123,7 +121,7 @@ export function chooseAutoNomination(state, teamId) {
   if (!available.length) return null;
   return available.map((player) => {
     const decision = localAutoIntent(state, teamId, player.id);
-    const intentBonus = decision.intent === "target" ? 1.2 : decision.intent === "value" ? 0.8 : 0.25;
+    const intentBonus = decision.intent === "target" ? 1.1 : decision.intent === "value" ? 1 : decision.intent === "discount" ? 0.9 : 0.25;
     const score = Math.max(1, Number(player.suggestedValue) || 1) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
     return { player, score };
   }).sort((a, b) => b.score - a.score || a.player.id.localeCompare(b.player.id))[0].player.id;
@@ -214,23 +212,10 @@ function missingFlexSlots(requirements, counts) {
   return Math.max(0, (requirements.FLEX || 0) - flexEligibleSurplus);
 }
 
-function repeatedPositionMultiplier(position, count, required) {
-  if (["K", "DST"].includes(position) && count >= Math.max(1, required)) return 0.45;
-  if (["QB", "TE"].includes(position) && count >= Math.max(1, required)) return 0.72;
-  if (count >= required + 2) return 0.78;
-  return 0.92;
-}
-
-function recentMarketMultiplier(state) {
-  const players = new Map(state.players.map((player) => [player.id, player]));
-  const ratios = state.sales.slice(-12).map((sale) => {
-    const suggested = Number(players.get(sale.playerId)?.suggestedValue) || 0;
-    return suggested > 0 ? Number(sale.amount) / suggested : null;
-  }).filter((value) => Number.isFinite(value));
-  if (!ratios.length) return 1;
-  ratios.sort((a, b) => a - b);
-  const median = ratios[Math.floor(ratios.length / 2)];
-  return boundedNumber(median, 0.8, 1.2, 1);
+function deterministicStandardNormal(key) {
+  const first = Math.max(Number.EPSILON, deterministicUnit(`${key}:u1`));
+  const second = deterministicUnit(`${key}:u2`);
+  return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * second);
 }
 
 function reactionScore(state, teamId) {

@@ -36,7 +36,7 @@ export class OpenAIAutodraftService {
       message: available
         ? this.lastError
           ? `AI autodraft strategy will retry on the next nomination. ${this.lastError}`
-          : `OpenAI ${this.model} decides pass, value, or target once per nomination.`
+          : `OpenAI ${this.model} decides pass, discount, value, or target once per nomination.`
         : "Local balanced autodraft strategy is active. Add OPENAI_API_KEY for AI intent decisions."
     };
   }

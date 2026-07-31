@@ -4,7 +4,13 @@ import { OpenAIAutodraftService } from "../src/openai-autodraft-service.mjs";
 
 const context = {
   player: { id: "runner", name: "Top Runner", position: "RB", suggestedValue: 30 },
-  league: { budget: 200, rosterSize: 15, rosterRequirements: { RB: 2 }, soldCount: 1, availableCount: 100 },
+  league: {
+    budget: 200,
+    rosterSize: 15,
+    rosterRequirements: { RB: 2 },
+    soldCount: 1,
+    availableCount: 100
+  },
   remainingByPosition: { RB: 20 },
   recentSales: [],
   teams: [
@@ -28,7 +34,7 @@ test("configured AI autodraft batches teams with strict structured output", asyn
   let request;
   const decisions = [
     { teamId: "a", intent: "target", reason: "required_position" },
-    { teamId: "b", intent: "pass", reason: "position_saturated" }
+    { teamId: "b", intent: "discount", reason: "position_saturated" }
   ];
   const service = new OpenAIAutodraftService({
     apiKey: "test-key",
@@ -44,7 +50,7 @@ test("configured AI autodraft batches teams with strict structured output", asyn
   assert.equal(request.options.headers.Authorization, "Bearer test-key");
   assert.deepEqual(request.body.reasoning, { effort: "none" });
   assert.equal(request.body.text.format.type, "json_schema");
-  assert.deepEqual(request.body.text.format.schema.properties.decisions.items.properties.intent.enum, ["pass", "value", "target"]);
+  assert.deepEqual(request.body.text.format.schema.properties.decisions.items.properties.intent.enum, ["pass", "discount", "value", "target"]);
   assert.match(request.body.input, /"teamId":"a"/);
   assert.deepEqual(result, { decisions, provider: "openai", model: "gpt-test" });
 });
