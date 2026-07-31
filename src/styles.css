@@ -96,6 +96,7 @@ button { color: inherit; }
 .phone-room-actions button:last-child { padding: 0 9px; background: transparent; }
 .phone-room-actions button:disabled { opacity: .35; cursor: default; }
 .phone-room-actions .icon { width: 12px; height: 12px; }
+.phone-room-error { margin: 8px 18px 0; border: 1px solid #9b5948; border-radius: 5px; padding: 8px 9px; background: #f1d7cc; color: #571711; font-size: 8px; line-height: 1.4; }
 .phone-claim-summary { margin: 14px 18px 7px; display: flex; align-items: center; justify-content: space-between; }
 .phone-claim-summary span { color: var(--muted); font: 700 7px/1 "DM Mono", monospace; letter-spacing: .14em; }
 .phone-claim-summary strong { font-size: 8px; }
@@ -205,13 +206,13 @@ button { color: inherit; }
 .queue-value { color: #88877f; font: 500 9px/1 "DM Mono", monospace; }
 .queue-row .icon { width: 12px; color: #565650; }
 .queue-actions { padding: 14px 18px; }
-.fantasy-pros-button { width: 100%; min-height: 54px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; background: var(--paper); color: #f6eedc; text-align: left; cursor: pointer; box-shadow: 3px 3px 0 var(--orange); transition: transform .14s ease, box-shadow .14s ease; }
-.fantasy-pros-button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--orange); }
-.fantasy-pros-button .icon { width: 16px; height: 16px; color: #f3c45e; }
-.fantasy-pros-button .icon-arrow { width: 13px; color: #f6eedc; }
-.fantasy-pros-button strong, .fantasy-pros-button small { display: block; }
-.fantasy-pros-button strong { font-size: 9px; }
-.fantasy-pros-button small { margin-top: 4px; color: #c7bda9; font: 500 7px/1 "DM Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
+.demo-data-button { width: 100%; min-height: 54px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; background: var(--paper); color: #f6eedc; text-align: left; cursor: pointer; box-shadow: 3px 3px 0 var(--orange); transition: transform .14s ease, box-shadow .14s ease; }
+.demo-data-button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--orange); }
+.demo-data-button .icon { width: 16px; height: 16px; color: #f3c45e; }
+.demo-data-button .icon-arrow { width: 13px; color: #f6eedc; }
+.demo-data-button strong, .demo-data-button small { display: block; }
+.demo-data-button strong { font-size: 9px; }
+.demo-data-button small { margin-top: 4px; color: #c7bda9; font: 500 7px/1 "DM Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .csv-import-button { margin-top: 13px; }
 .text-button { border: 0; background: none; color: #85847c; font-size: 9px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; padding: 4px 0; }
 .text-button:hover { color: var(--paper); }
@@ -291,6 +292,17 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .form-grid label { color: #8a8981; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .form-grid input { width: 100%; height: 38px; margin-top: 7px; border: 1px solid #383833; border-radius: 6px; padding: 0 10px; background: #151513; color: var(--paper); outline: 0; }
 .form-grid input:focus { border-color: var(--orange); }
+.countdown-settings { margin: 18px 0 0; padding: 0; border: 0; }
+.countdown-settings legend { color: #554d41; font: 700 8px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.countdown-settings > p { margin: 7px 0 9px; color: #655b4d; font-size: 8px; line-height: 1.45; }
+.countdown-slider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.countdown-slider { display: block; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; background: #fff9ed; }
+.countdown-slider > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; }
+.countdown-slider strong,.countdown-slider small { display: block; }
+.countdown-slider strong { font-size: 9px; }
+.countdown-slider small { margin-top: 4px; color: var(--muted); font-size: 7px; }
+.countdown-slider output { grid-column: 2; grid-row: 1 / span 2; color: #8a5700; font: 800 9px/1 "DM Mono", monospace; white-space: nowrap; }
+.countdown-slider input,.speed-slider input { width: 100%; margin: 12px 0 0; accent-color: var(--orange); cursor: pointer; }
 .team-name-field { grid-column: 1 / -1; }
 .setup-step > .team-name-field { display: block; color: #554d41; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .team-name-field textarea { width: 100%; margin-top: 7px; border: 1px solid #383833; border-radius: 6px; padding: 10px; resize: vertical; background: #151513; color: var(--paper); outline: 0; font: 500 11px/1.6 "DM Mono", monospace; }
@@ -387,6 +399,14 @@ dialog form > p { color: #85847c; font-size: 11px; line-height: 1.55; max-width:
 .energy-grid small { margin-top: 4px; color: var(--muted); font-size: 7px; }
 .energy-grid label:has(input:checked) { background: var(--paper); color: #f6eedc; box-shadow: 3px 3px 0 var(--orange); }
 .energy-grid label:has(input:checked) small { color: #c9bba4; }
+.speed-slider { display: block; border: 1px solid var(--line); border-radius: 6px; padding: 10px 13px; background: #fff9ed; }
+.speed-slider > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.speed-slider strong { font-size: 9px; }
+.speed-slider output { color: #8a5700; font: 800 9px/1 "DM Mono", monospace; }
+.speed-slider > i { margin-top: 6px; display: grid; grid-template-columns: repeat(4, 1fr); color: var(--muted); font-style: normal; }
+.speed-slider > i small { font: 600 6px/1 "DM Mono", monospace; text-align: center; }
+.speed-slider > i small:first-child { text-align: left; }
+.speed-slider > i small:last-child { text-align: right; }
 .audio-preflight { min-height: 65px; margin-top: 17px; display: flex; align-items: center; justify-content: space-between; gap: 15px; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; background: #e6d6b6; }
 .audio-preflight small,.audio-preflight strong { display: block; }
 .audio-preflight small { color: #6e604c; font: 700 7px/1 "DM Mono", monospace; letter-spacing: .12em; }

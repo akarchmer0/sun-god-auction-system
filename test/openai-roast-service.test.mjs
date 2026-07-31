@@ -22,7 +22,7 @@ test("unconfigured roast service keeps the contextual rotation available", async
   assert.notEqual(first.text, second.text);
 });
 
-test("configured service calls the Responses API with a selected reference and low verbosity", async () => {
+test("configured service asks OpenAI to context-edit a candidate with structured output", async () => {
   let request;
   const service = new OpenAIRoastService({
     apiKey: "test-key",
@@ -32,7 +32,13 @@ test("configured service calls the Responses API with a selected reference and l
       request = { url, options, body: JSON.parse(options.body) };
       return {
         ok: true,
-        json: async () => ({ output: [{ content: [{ type: "output_text", text: "Ari just turned a $9 suggestion into a $28 cry for help." }] }] })
+        json: async () => ({
+          output_text: JSON.stringify({
+            text: "Ari just turned a $9 suggestion into a $28 cry for help.",
+            priceAngle: "overpay",
+            premiseSupported: true
+          })
+        })
       };
     }
   });
@@ -42,9 +48,14 @@ test("configured service calls the Responses API with a selected reference and l
   assert.equal(request.body.model, "gpt-test");
   assert.equal(request.body.store, false);
   assert.deepEqual(request.body.reasoning, { effort: "none" });
-  assert.deepEqual(request.body.text, { verbosity: "low" });
-  assert.match(request.body.instructions, /selected reference/);
+  assert.equal(request.body.text.verbosity, "low");
+  assert.equal(request.body.text.format.type, "json_schema");
+  assert.equal(request.body.text.format.strict, true);
+  assert.match(request.body.instructions, /final context editor/);
+  assert.match(request.body.instructions, /raw material, not an assignment/);
   assert.match(request.body.input, /Already used/);
+  assert.match(request.body.input, /candidateJoke/);
+  assert.match(request.body.input, /priceOutcome/);
   assert.equal(result.provider, "openai");
   assert.match(result.text, /\$28 cry for help/);
 });
@@ -56,14 +67,23 @@ test("configured service stops cycling references and requests original roasts a
     onError: () => {},
     fetchImpl: async (_url, options) => {
       instructions.push(JSON.parse(options.body).instructions);
-      return { ok: true, json: async () => ({ output_text: "A fresh dark roast from the live context." }) };
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            text: "Ari saw the sheet, ignored it, and set nineteen dollars on fire.",
+            priceAngle: "overpay",
+            premiseSupported: true
+          })
+        })
+      };
     }
   });
   const results = [];
   for (let index = 0; index < 12; index += 1) results.push(await service.createRoast({ context }));
-  assert.match(instructions[9], /selected reference is the rotation assignment/);
-  assert.match(instructions[10], /Invent a genuinely new dark premise and punchline/);
-  assert.match(instructions[11], /Invent a genuinely new dark premise and punchline/);
+  assert.match(instructions[9], /raw material, not an assignment/);
+  assert.match(instructions[10], /Invent a new premise from the supplied auction facts/);
+  assert.match(instructions[11], /Invent a new premise from the supplied auction facts/);
   assert.equal(results[9].referenceIndex, 9);
   assert.equal(results[10].referenceIndex, null);
   assert.equal(results[11].referenceIndex, null);
@@ -78,5 +98,35 @@ test("API failures fall back to the selected curated line", async () => {
   const result = await service.createRoast({ context });
   assert.equal(result.provider, "curated");
   assert.equal(result.referenceIndex, 0);
-  assert.match(result.text, /Ari is spending/);
+  assert.match(result.text, /19 dollars over/);
+});
+
+test("contradictory OpenAI edits are rejected for a context-safe fallback", async () => {
+  const discountContext = {
+    ...context,
+    playerName: "Jaxon Smith-Njigba",
+    position: "WR",
+    amount: 31,
+    suggestedValue: 44
+  };
+  const errors = [];
+  const service = new OpenAIRoastService({
+    apiKey: "test-key",
+    onError: (message) => errors.push(message),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify({
+          text: "JSN is a sleeper and Ari wildly overpaid.",
+          priceAngle: "overpay",
+          premiseSupported: true
+        })
+      })
+    })
+  });
+  const result = await service.createRoast({ context: discountContext });
+  assert.equal(result.provider, "curated");
+  assert.match(result.text, /13 dollars below/);
+  assert.doesNotMatch(result.text, /sleeper|overpaid/i);
+  assert.match(errors[0], /did not match the sale context/i);
 });

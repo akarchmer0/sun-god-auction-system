@@ -62,6 +62,30 @@ test("a new fallback announcement interrupts the previous one by default", () =>
   assert.ok(cancelCount >= 2);
 });
 
+test("interrupted speech reports cancellation without pretending it completed", () => {
+  const utterances = [];
+  class FakeUtterance {
+    constructor(text) { this.text = text; }
+  }
+  const speechSynthesis = {
+    cancel() {},
+    getVoices() { return []; },
+    speak(utterance) { utterances.push(utterance); }
+  };
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: null,
+    speechSynthesisImpl: speechSynthesis,
+    UtteranceImpl: FakeUtterance
+  });
+  voice.status.available = false;
+  let cancelled = 0;
+  let completed = 0;
+  voice.speak("Sold", { onCancel: () => { cancelled += 1; }, onDone: () => { completed += 1; } });
+  voice.speak("Next player");
+  assert.equal(cancelled, 1);
+  assert.equal(completed, 0);
+});
+
 test("queued bid announcements finish the current line and collapse to the best new bid", () => {
   const utterances = [];
   let cancelCount = 0;
@@ -126,11 +150,11 @@ test("a stalled realtime stream fails over to an energetic browser voice", async
     streamTimeoutMs: 5
   });
   voice.status.available = true;
-  voice.speak("Can you hear Lucy?", { personality: "hype", energy: 3 });
+  voice.speak("Can you hear Lucy?", { personality: "hype", energy: 3, speed: "fastest" });
   await new Promise((resolve) => setTimeout(resolve, 15));
   assert.equal(utterances.length, 1);
   assert.equal(utterances[0].voice.name, "Samantha");
-  assert.ok(utterances[0].rate > 1.1);
+  assert.ok(utterances[0].rate > 1.25);
   assert.equal(voice.status.provider, "browser");
 });
 

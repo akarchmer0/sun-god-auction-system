@@ -30,6 +30,12 @@ test("personality and energy adjust Cartesia performance direction", () => {
   assert.equal(fullSend.emotion, "excited");
 });
 
+test("auctioneer speed setting increases Cartesia cadence", () => {
+  const normal = speechDirections("countdown", { speed: "normal" });
+  const fastest = speechDirections("countdown", { speed: "fastest" });
+  assert.ok(fastest.speed > normal.speed);
+});
+
 test("roasts use a dry sarcastic performance direction", () => {
   assert.deepEqual(speechDirections("roast"), { speed: 1, emotion: "sarcastic" });
 });
@@ -71,9 +77,9 @@ test("Cartesia service warms one socket and routes audio by context", async () =
   await service.warm();
   assert.match(FakeWebSocket.instance.url, /access_token=short-lived-token/);
   const events = [];
-  const speech = await service.createSpeech({ transcript: "Going once", style: "countdown", personality: "pro", energy: 3, onEvent: (event) => events.push(event) });
+  const speech = await service.createSpeech({ transcript: "Going once", style: "countdown", personality: "pro", energy: 3, speed: "fastest", onEvent: (event) => events.push(event) });
   assert.equal(FakeWebSocket.instance.sent[0].context_id, "context-1");
-  assert.ok(FakeWebSocket.instance.sent[0].generation_config.speed > speechDirections("countdown").speed);
+  assert.ok(FakeWebSocket.instance.sent[0].generation_config.speed > speechDirections("countdown", { personality: "pro", energy: 3 }).speed);
   FakeWebSocket.instance.emit("message", { data: JSON.stringify({ type: "chunk", context_id: "context-1", data: "AAAA" }) });
   FakeWebSocket.instance.emit("message", { data: JSON.stringify({ type: "done", context_id: "context-1", done: true }) });
   await speech.done;

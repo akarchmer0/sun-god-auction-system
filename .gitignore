@@ -1,2 +1,7 @@
 .env
 __pycache__/
+node_modules/
+dist/
+.pnpm-store/
+.wrangler/
+relay/.dev.vars

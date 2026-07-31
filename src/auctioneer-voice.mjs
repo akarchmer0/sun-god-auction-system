@@ -1,4 +1,5 @@
 import { SPEECH_PROVIDER_IDS, speechProviderStatus } from "./auctioneer-speech-providers.mjs";
+import { auctioneerSpeedOffset, normalizeAuctioneerSpeed } from "./auctioneer-speed.mjs";
 
 export class AuctioneerVoice {
   constructor({
@@ -71,18 +72,21 @@ export class AuctioneerVoice {
     priority = 0,
     personality = "classic",
     energy = 2,
+    speed = "normal",
     interrupt = true,
     queueKey = null,
+    onCancel,
     onDone
   } = {}) {
     const transcript = String(text || "").trim();
     if (!transcript) { onDone?.(); return; }
     const request = {
       transcript,
-      performance: { style, personality, energy },
+      performance: { style, personality, energy, speed: normalizeAuctioneerSpeed(speed) },
       priority: Number(priority) || 0,
       queueKey: queueKey ? String(queueKey) : null,
       sequence: this.queueSequence += 1,
+      onCancel,
       onDone
     };
     if (this.active && !interrupt) {
@@ -97,6 +101,7 @@ export class AuctioneerVoice {
     const active = {
       id: Symbol("auctioneer-speech"),
       priority: request.priority,
+      onCancel: request.onCancel,
       onDone: request.onDone,
       abortController: new AbortController(),
       sources: new Set(),
@@ -140,6 +145,7 @@ export class AuctioneerVoice {
     }
     active.sources.clear();
     this.speechSynthesis?.cancel();
+    try { active.onCancel?.(); } catch {}
   }
 
   async #streamRealtime(transcript, performance, active) {
@@ -244,14 +250,14 @@ export class AuctioneerVoice {
     }, remainingPlaybackMs + this.playbackCompletionGraceMs);
   }
 
-  #speakWithBrowser(transcript, active, { style = "neutral", personality = "classic", energy = 2 } = {}) {
+  #speakWithBrowser(transcript, active, { style = "neutral", personality = "classic", energy = 2, speed = "normal" } = {}) {
     if (!this.speechSynthesis || !this.UtteranceImpl || this.active !== active) return this.#finish(active);
     this.speechSynthesis.cancel();
     const utterance = new this.UtteranceImpl(transcript);
     const level = Math.min(3, Math.max(1, Number(energy) || 2));
     const personalityRate = ({ classic: 0, hype: 0.08, pro: 0.05 })[personality] || 0;
     const styleRate = style === "countdown" ? -0.04 : ["bid", "patter"].includes(style) ? 0.06 : style === "roast" ? -0.02 : 0;
-    utterance.rate = Number((1.03 + (level - 2) * 0.08 + personalityRate + styleRate).toFixed(2));
+    utterance.rate = Number(Math.min(2, 1.03 + (level - 2) * 0.08 + personalityRate + styleRate + auctioneerSpeedOffset(speed)).toFixed(2));
     utterance.pitch = personality === "hype" ? 1.04 : personality === "pro" ? 0.94 : 1;
     const voices = this.speechSynthesis.getVoices();
     utterance.voice = voices.find((voice) => /Samantha|Karen|Moira|Google UK English Female|Microsoft Sonia/i.test(voice.name))

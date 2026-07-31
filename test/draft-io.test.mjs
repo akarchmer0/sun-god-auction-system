@@ -52,6 +52,12 @@ test("mapped CSV rows normalize player fields and money", () => {
   });
 });
 
+test("mapped CSV rejects unsupported positions, unsafe abbreviations, and oversized input", () => {
+  assert.throws(() => playersFromMappedCsv([["Injected", "<img>", "FA", "1"]], { name: 0, position: 1, team: 2, value: 3 }), /unsupported position/);
+  assert.throws(() => playersFromMappedCsv([["Injected", "WR", "<X>", "1"]], { name: 0, position: 1, team: 2, value: 3 }), /invalid NFL team/);
+  assert.throws(() => parseCsv(`name,position\n${"x".repeat(1_000_001)},WR`), /larger than 1 MB/);
+});
+
 test("results payload powers CSV and platform copy formats", () => {
   const payload = buildResultsPayload(draft, 5000);
   assert.equal(payload.teams[0].spent, 51);
@@ -67,4 +73,15 @@ test("shareable result fragments round-trip a compressed draft snapshot", async 
   const encoded = await encodeResultsPayload(payload);
   assert.match(encoded, /^[gj]\./);
   assert.deepEqual(await decodeResultsPayload(encoded), payload);
+});
+
+test("shareable results sanitize display fields and enforce encoded size limits", async () => {
+  const payload = buildResultsPayload(draft, 5000);
+  payload.teams[0].color = "url(javascript:alert(1))";
+  payload.sales[0].position = "<img>";
+  const encoded = await encodeResultsPayload(payload);
+  const decoded = await decodeResultsPayload(encoded);
+  assert.equal(decoded.teams[0].color, "#d39a20");
+  assert.equal(decoded.sales[0].position, "FLEX");
+  await assert.rejects(() => decodeResultsPayload(`j.${"a".repeat(1_500_001)}`), /too large/);
 });

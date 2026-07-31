@@ -1,6 +1,7 @@
 export const MIN_BID = 1;
 
 export const ROSTER_POSITIONS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
+export const DEFAULT_COUNTDOWN_SECONDS = Object.freeze({ once: 5.2, twice: 4.2 });
 
 export function createDraft({
   players,
@@ -9,11 +10,20 @@ export function createDraft({
   rosterSize = 15,
   increment = 1,
   rosterRequirements = {},
-  nominationOrder = null
+  nominationOrder = null,
+  countdownOnceSeconds = DEFAULT_COUNTDOWN_SECONDS.once,
+  countdownTwiceSeconds = DEFAULT_COUNTDOWN_SECONDS.twice
 }) {
   const order = normalizeNominationOrder(nominationOrder, teams);
   return {
-    config: { budget, rosterSize, increment, rosterRequirements: normalizeRosterRequirements(rosterRequirements) },
+    config: {
+      budget,
+      rosterSize,
+      increment,
+      rosterRequirements: normalizeRosterRequirements(rosterRequirements),
+      countdownOnceSeconds: normalizeCountdownSeconds(countdownOnceSeconds, DEFAULT_COUNTDOWN_SECONDS.once),
+      countdownTwiceSeconds: normalizeCountdownSeconds(countdownTwiceSeconds, DEFAULT_COUNTDOWN_SECONDS.twice)
+    },
     players: players.map((player) => ({ ...player })),
     teams: teams.map((team) => ({ ...team, budget, roster: [...(team.roster || [])] })),
     queue: players.map((player) => player.id),
@@ -22,6 +32,24 @@ export function createDraft({
     sales: [],
     log: [{ id: cryptoId(), type: "system", message: "Draft room opened", at: Date.now() }]
   };
+}
+
+export function normalizeCountdownSeconds(value, fallback) {
+  const seconds = Number(value);
+  const safeFallback = Number(fallback) || DEFAULT_COUNTDOWN_SECONDS.once;
+  if (!Number.isFinite(seconds)) return safeFallback;
+  return Math.round(Math.min(20, Math.max(2, seconds)) * 10) / 10;
+}
+
+export function countdownDelayMs(config, phase) {
+  if (phase === "open") return 8_000;
+  if (phase === "once") {
+    return normalizeCountdownSeconds(config?.countdownOnceSeconds, DEFAULT_COUNTDOWN_SECONDS.once) * 1_000;
+  }
+  if (phase === "twice") {
+    return normalizeCountdownSeconds(config?.countdownTwiceSeconds, DEFAULT_COUNTDOWN_SECONDS.twice) * 1_000;
+  }
+  return 0;
 }
 
 export function emptyAuction() {
@@ -184,6 +212,64 @@ export function undoLastSale(state) {
     nomination: { ...(state.nomination || { order: state.teams.map((team) => team.id) }), currentIndex: sale.nominationIndex ?? Math.max(0, (state.nomination?.currentIndex || 1) - 1) },
     sales: state.sales.slice(0, -1),
     log: addLog(state.log, "undo", `Reversed the sale of ${player.name}`)
+  };
+}
+
+export function correctSale(state, saleId, { teamId, amount, returnToPool = false } = {}) {
+  const saleIndex = state.sales.findIndex((sale) => sale.id === saleId);
+  if (saleIndex < 0) throw new Error("Choose a valid sale to correct.");
+  const original = state.sales[saleIndex];
+  let sales;
+  if (returnToPool) {
+    sales = state.sales.filter((sale) => sale.id !== saleId);
+  } else {
+    if (!state.teams.some((team) => team.id === teamId)) throw new Error("Choose a valid buyer.");
+    if (!Number.isInteger(Number(amount)) || Number(amount) < MIN_BID) throw new Error("Enter a valid whole-dollar sale price.");
+    sales = state.sales.map((sale) => sale.id === saleId ? { ...sale, teamId, amount: Number(amount), correctedAt: Date.now() } : sale);
+  }
+  const rebuilt = rebuildFromSales(state, sales);
+  const returnedPlayer = returnToPool ? state.players.find((player) => player.id === original.playerId) : null;
+  return {
+    ...rebuilt,
+    queue: returnedPlayer ? [returnedPlayer.id, ...rebuilt.queue.filter((id) => id !== returnedPlayer.id)] : rebuilt.queue,
+    auction: { ...emptyAuction(), phase: "paused", playerId: returnedPlayer?.id || null, nominatorTeamId: original.nominatorTeamId || null },
+    nomination: returnToPool
+      ? { ...state.nomination, currentIndex: original.nominationIndex ?? state.nomination?.currentIndex ?? 0 }
+      : rebuilt.nomination,
+    log: addLog(state.log, "correction", returnToPool
+      ? `Returned ${returnedPlayer?.name || "player"} to the available pool`
+      : `Corrected ${state.players.find((player) => player.id === original.playerId)?.name || "sale"} to ${state.teams.find((team) => team.id === teamId)?.name} for $${amount}`)
+  };
+}
+
+export function rebuildFromSales(state, sales = state.sales) {
+  const playersById = new Map(state.players.map((player) => [player.id, player]));
+  const teamsById = new Map(state.teams.map((team) => [team.id, { ...team, budget: state.config.budget, roster: [] }]));
+  const soldPlayerIds = new Set();
+  for (const sale of sales) {
+    if (soldPlayerIds.has(sale.playerId)) throw new Error("A player cannot appear in more than one sale.");
+    const player = playersById.get(sale.playerId);
+    const team = teamsById.get(sale.teamId);
+    if (!player || !team) throw new Error("A corrected sale references missing draft data.");
+    if (!Number.isInteger(Number(sale.amount)) || Number(sale.amount) < MIN_BID) throw new Error("Every sale needs a valid whole-dollar price.");
+    if (team.roster.length >= state.config.rosterSize) throw new Error(`${team.name}'s corrected roster would be over capacity.`);
+    team.budget -= Number(sale.amount);
+    team.roster.push({ playerId: sale.playerId, price: Number(sale.amount) });
+    const reserve = state.config.rosterSize - team.roster.length;
+    if (team.budget < reserve) throw new Error(`${team.name}'s corrected spending would violate the roster reserve.`);
+    soldPlayerIds.add(sale.playerId);
+  }
+  const lastSale = sales.at(-1);
+  return {
+    ...state,
+    players: state.players.map((player) => ({ ...player, status: soldPlayerIds.has(player.id) ? "sold" : "available" })),
+    teams: state.teams.map((team) => teamsById.get(team.id)),
+    queue: state.players.filter((player) => !soldPlayerIds.has(player.id)).map((player) => player.id),
+    sales: sales.map((sale) => ({ ...sale })),
+    nomination: {
+      ...(state.nomination || { order: state.teams.map((team) => team.id) }),
+      currentIndex: lastSale ? ((Number(lastSale.nominationIndex) || 0) + 1) % state.teams.length : 0
+    }
   };
 }
 

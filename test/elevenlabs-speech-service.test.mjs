@@ -20,6 +20,12 @@ test("ElevenLabs generation initializes a context with energetic voice settings"
   assert.ok(message.voice_settings.stability < 0.4);
 });
 
+test("auctioneer speed setting increases ElevenLabs cadence", () => {
+  const normal = elevenLabsVoiceSettings("countdown", { speed: "normal" });
+  const fastest = elevenLabsVoiceSettings("countdown", { speed: "fastest" });
+  assert.ok(fastest.speed > normal.speed);
+});
+
 test("ElevenLabs keeps one multi-context socket warm across utterances", async () => {
   let socketCount = 0;
   let tokenRequest;

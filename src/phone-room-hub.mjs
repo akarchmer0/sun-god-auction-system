@@ -1,9 +1,14 @@
 const ROOM_CODE_PATTERN = /^[A-Z2-9]{6}$/;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{12,160}$/;
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+const POSITIONS = new Set(["QB", "RB", "WR", "TE", "FLEX", "K", "DST"]);
+const PHASES = new Set(["idle", "ready", "open", "once", "twice", "paused", "sold", "passed"]);
 
 export class PhoneRoomHub {
-  constructor({ now = () => Date.now() } = {}) {
+  constructor({ now = () => Date.now(), roomTtlMs = 24 * 60 * 60 * 1000, maxListeners = 20 } = {}) {
     this.now = now;
+    this.roomTtlMs = roomTtlMs;
+    this.maxListeners = maxListeners;
     this.rooms = new Map();
     this.listeners = new Map();
   }
@@ -137,6 +142,7 @@ export class PhoneRoomHub {
   subscribe(roomId, listener) {
     const room = this.requireRoom(roomId);
     const listeners = this.listeners.get(room.id) || new Set();
+    if (listeners.size >= this.maxListeners) throw roomError("This room has reached its connection limit.", 429);
     listeners.add(listener);
     this.listeners.set(room.id, listeners);
     listener({ type: "snapshot", room: this.snapshot(room.id) });
@@ -150,6 +156,11 @@ export class PhoneRoomHub {
     const id = normalizeRoomId(roomId);
     const room = this.rooms.get(id);
     if (!room) throw roomError("Draft room not found. Check the six-character room code.", 404);
+    if (this.now() - room.createdAt >= this.roomTtlMs) {
+      this.rooms.delete(id);
+      this.listeners.delete(id);
+      throw roomError("This draft room has expired.", 410);
+    }
     return room;
   }
 
@@ -177,7 +188,7 @@ function requireToken(value, label) {
 function normalizeTeams(teams) {
   if (!Array.isArray(teams) || teams.length < 2 || teams.length > 16) throw roomError("A room needs 2–16 teams.", 400);
   const clean = teams.map((team, index) => ({
-    id: cleanText(team?.id, 80) || `team-${index + 1}`,
+    id: cleanId(team?.id, 80) || `team-${index + 1}`,
     name: cleanText(team?.name, 100) || `Team ${index + 1}`,
     manager: cleanText(team?.manager, 100) || `Manager ${index + 1}`,
     color: /^#[0-9a-f]{6}$/i.test(team?.color) ? team.color : "#d39a20",
@@ -205,34 +216,55 @@ function normalizeLiveTeams(teams, roomTeams) {
 
 function normalizeRoster(roster) {
   return Array.isArray(roster) ? roster.slice(0, 40).map((player) => ({
-    playerId: cleanText(player?.playerId, 100),
+    playerId: cleanId(player?.playerId, 100),
     name: cleanText(player?.name, 140) || "Unknown player",
-    position: cleanText(player?.position, 20) || "FLEX",
-    nflTeam: cleanText(player?.nflTeam, 20) || "FA",
+    position: cleanPosition(player?.position),
+    nflTeam: cleanNflTeam(player?.nflTeam),
     price: boundedNumber(player?.price)
   })) : [];
 }
 
 function normalizeAuction(auction) {
   const phase = cleanText(auction?.phase, 30) || "idle";
+  if (!PHASES.has(phase)) throw roomError("The auction phase is invalid.", 400);
   return {
     phase,
     amount: boundedNumber(auction?.amount),
     nextBid: boundedNumber(auction?.nextBid),
-    highBidderId: cleanText(auction?.highBidderId, 80) || null,
+    highBidderId: auction?.highBidderId ? cleanId(auction.highBidderId, 80) : null,
     acceptingBids: Boolean(auction?.acceptingBids),
     player: auction?.player ? {
-      id: cleanText(auction.player.id, 100),
+      id: cleanId(auction.player.id, 100),
       name: cleanText(auction.player.name, 140),
-      position: cleanText(auction.player.position, 20),
-      nflTeam: cleanText(auction.player.nflTeam, 20),
+      position: cleanPosition(auction.player.position),
+      nflTeam: cleanNflTeam(auction.player.nflTeam),
       suggestedValue: boundedNumber(auction.player.suggestedValue)
     } : null
   };
 }
 
 function cleanText(value, maximum) {
-  return String(value || "").trim().slice(0, maximum);
+  const text = String(value || "").trim();
+  if (text.length > maximum || /[\u0000-\u001f\u007f]/.test(text)) throw roomError("A text field is invalid.", 400);
+  return text;
+}
+
+function cleanId(value, maximum) {
+  const id = cleanText(value, maximum);
+  if (id && !ID_PATTERN.test(id)) throw roomError("An identifier is invalid.", 400);
+  return id;
+}
+
+function cleanPosition(value) {
+  const position = cleanText(value || "FLEX", 10).toUpperCase();
+  if (!POSITIONS.has(position)) throw roomError("A player position is invalid.", 400);
+  return position;
+}
+
+function cleanNflTeam(value) {
+  const nflTeam = cleanText(value || "FA", 4).toUpperCase();
+  if (!/^(?:[A-Z]{2,4}|FA)$/.test(nflTeam)) throw roomError("An NFL team abbreviation is invalid.", 400);
+  return nflTeam;
 }
 
 function boundedNumber(value) {

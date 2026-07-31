@@ -1,6 +1,11 @@
 import { seedPlayers, makeTeams, parseTeamSetupLines } from "./data.mjs";
-import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
+import {
+  AUCTIONEER_SPEED_OPTIONS,
+  auctioneerSpeedAt,
+  auctioneerSpeedIndex,
+  normalizeAuctioneerSpeed
+} from "./auctioneer-speed.mjs";
 import { createAuctioneerScript, AUCTIONEER_PERSONALITIES } from "./auctioneer-script.mjs";
 import {
   buildPatterPassage,
@@ -10,6 +15,8 @@ import {
 } from "./auctioneer-patter.mjs";
 import { shouldRoastSale } from "./roast-engine.mjs";
 import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
+import { LanRoomTransport, RelayRoomTransport } from "./room-transports.mjs";
+import { validateDraftState } from "./draft-state-validation.mjs";
 import {
   parseCsv,
   suggestCsvMapping,
@@ -31,11 +38,15 @@ import {
   advanceCountdown,
   moveToNextPlayer,
   undoLastSale,
+  correctSale,
   currentPlayer,
   maxBidForTeam,
   currentNominator,
   canTeamRosterPlayer,
-  ROSTER_POSITIONS
+  ROSTER_POSITIONS,
+  DEFAULT_COUNTDOWN_SECONDS,
+  countdownDelayMs,
+  normalizeCountdownSeconds
 } from "./domain.mjs";
 import {
   autoBidDelayMs,
@@ -52,11 +63,19 @@ const STORAGE_KEY = "gavel-draft-v1";
 const PHONE_ROOM_ID_STORAGE_KEY = "sun-god-phone-room-id";
 const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const AUCTIONEER_PROFILE_STORAGE_KEY = "sun-god-auctioneer-profile-v1";
-const COUNTDOWN_DELAYS = { open: 8000, once: 5200, twice: 4200 };
+const PERSONAL_SETUP_STORAGE_KEY = "sun-god-personal-setup-v1";
 const SPEECH_PRIORITY = { patter: 20, nomination: 30, countdown: 50, bid: 100, roast: 105, sold: 110, ruling: 120, preflight: 130 };
 const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
-let state = restoreDraft() || createDraft({
+const hostToken = await loadHostSession();
+const restoredRelaySession = await globalThis.sunGod?.relaySession?.get?.();
+const durableDraft = await loadDurableDraft();
+const legacyDraft = restoreDraft();
+let draftRevision = durableDraft.revision || 0;
+let draftSavePromise = Promise.resolve();
+let durableSaveFailed = false;
+let emergencyLocked = false;
+let state = restoreDraft(durableDraft.state) || legacyDraft || createDraft({
   players: seedPlayers,
   teams: makeTeams(),
   budget: 200,
@@ -82,13 +101,18 @@ let recentPatterLines = [];
 let notice = null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
-let phoneRoomEvents = null;
+let phoneRoomTransport = null;
 let phoneRoomSyncTimer = null;
 let phoneRoom = {
-  roomId: localStorage.getItem(PHONE_ROOM_ID_STORAGE_KEY) || createRoomCode(),
+  mode: restoredRelaySession?.expiresAt > Date.now() ? "remote" : "local",
+  roomId: restoredRelaySession?.roomId || localStorage.getItem(PHONE_ROOM_ID_STORAGE_KEY) || createRoomCode(),
   hostKey: localStorage.getItem(PHONE_ROOM_HOST_KEY_STORAGE_KEY) || createHostKey(),
   status: "starting",
-  joinUrl: "",
+  joinUrl: restoredRelaySession?.bidderUrl || "",
+  relayUrl: restoredRelaySession?.relayUrl || "",
+  relaySecret: restoredRelaySession?.hostSessionSecret || "",
+  meetingLink: restoredRelaySession?.meetingLink || "",
+  latencyMs: null,
   claimedTeamIds: [],
   error: null
 };
@@ -105,6 +129,7 @@ let auctioneerService = {
 let auctioneerScript = createAuctioneerScript(auctioneerProfile);
 const auctioneerVoice = new AuctioneerVoice({
   provider: auctioneerProfile.provider,
+  fetchImpl: hostFetch,
   onStatusChange: (snapshot) => {
     const changed = snapshot.status !== auctioneerService.status
       || snapshot.available !== auctioneerService.available
@@ -121,13 +146,18 @@ const auctioneerVoice = new AuctioneerVoice({
 });
 render();
 wireGlobalEvents();
+if (globalThis.sunGod?.isDesktop && localStorage.getItem(PERSONAL_SETUP_STORAGE_KEY) !== "complete") {
+  window.setTimeout(() => document.querySelector("#onboarding-dialog")?.showModal(), 0);
+}
+if (!durableDraft.state) persistDraft();
 void auctioneerVoice.initialize(auctioneerProfile.provider);
-void initializePhoneRoom();
+void initializeBiddingRoom();
 if (state.auction.phase === "ready") void prepareAutoIntents();
 else if (isLiveAuctionPhase(state.auction.phase)) { freezeLocalAutoIntents(); resumeAuctionFlow(); }
 else scheduleAutoNomination();
 
 function render() {
+  const openDialogId = document.querySelector("dialog[open]")?.id;
   const player = currentPlayer(state);
   const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
   const nextNominator = currentNominator(state);
@@ -156,7 +186,10 @@ function render() {
           <span>${escapeHtml(nextNominator?.manager || "Commissioner")} ${["sold", "passed"].includes(state.auction.phase) ? "nominates next" : "nominates"}</span>
         </div>
         <div class="device-controls">
+          <button class="device-button ${emergencyLocked ? "is-on" : ""}" data-action="emergency-lock" title="Pause bidding and enable historical corrections">${emergencyLocked ? "UNLOCK" : "LOCK"}</button>
           <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} phones</span></button>
+          ${globalThis.sunGod?.diagnostics ? `<button class="icon-button" data-action="export-diagnostics" title="Export redacted diagnostics">${icon("database")}</button>` : ""}
+          ${globalThis.sunGod?.isDesktop ? `<button class="icon-button" data-action="personal-settings" title="Personal relay and provider settings">${icon("key")}</button>` : ""}
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="audio-settings" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
           <button class="icon-button" data-action="setup" title="League setup">${icon("settings")}</button>
         </div>
@@ -168,7 +201,7 @@ function render() {
       <main class="draft-grid">
         <section id="phone-room-panel" class="phone-room-panel panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">PHONE BIDDING</span><h2>Draft room</h2></div>
+            <div><span class="eyebrow">${phoneRoom.mode === "remote" ? "REMOTE BIDDING" : "LOCAL PHONE BIDDING"}</span><h2>Draft room</h2></div>
             <span class="phone-room-status ${phoneRoom.status === "live" ? "is-live" : ""}"><i></i>${phoneRoomStatusLabel()}</span>
           </div>
           <div class="phone-join-card">
@@ -176,14 +209,17 @@ function render() {
             <div class="phone-join-copy">
               <small>ROOM CODE</small>
               <strong>${escapeHtml(phoneRoom.roomId)}</strong>
-              <p>${phoneRoom.joinUrl ? "Scan to join on the same Wi-Fi." : "Preparing the phone room…"}</p>
+              <p>${phoneRoom.joinUrl ? phoneRoom.mode === "remote" ? "Local and remote phones use this relay link for fair timestamps." : "Scan to join on the same Wi-Fi." : "Preparing the phone room…"}</p>
               <span title="${escapeHtml(phoneRoom.joinUrl)}">${escapeHtml(phoneRoom.joinUrl || "Finding this Mac’s network address…")}</span>
             </div>
           </div>
           <div class="phone-room-actions">
+            <button data-action="toggle-bidding-mode">${phoneRoom.mode === "remote" ? "Switch to local-only" : "Enable remote bidders"}</button>
+            <button data-action="phone-preflight">Run preflight</button>
             <button data-action="copy-phone-link" ${phoneRoom.joinUrl ? "" : "disabled"}>${icon("copy")} Copy join link</button>
-            <button data-action="reset-phone-claims" ${phoneRoom.claimedTeamIds.length ? "" : "disabled"}>Reset phones</button>
+            <button data-action="reset-phone-claims" ${phoneRoom.mode === "remote" || !phoneRoom.claimedTeamIds.length ? "disabled" : ""}>Reset phones</button>
           </div>
+          ${phoneRoom.error ? `<p class="phone-room-error" role="alert">${escapeHtml(phoneRoom.error)}</p>` : ""}
           <div class="phone-claim-summary"><span>PARTICIPANTS</span><strong>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} joined</strong></div>
           <div class="phone-claim-grid">
             ${state.teams.map((team) => {
@@ -192,7 +228,7 @@ function render() {
               return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${automatic ? "AUTO DRAFT" : joined ? "PHONE READY" : "WAITING"}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
             }).join("")}
           </div>
-          <p class="camera-note">Human managers scan once and choose their team. Auto teams make one strategic intent decision per nomination, then bid locally within the league rules.</p>
+          <p class="camera-note">${phoneRoom.mode === "remote" ? `Room audio uses your league call. ${phoneRoom.latencyMs == null ? "Measuring relay latency…" : `Relay round trip: ${phoneRoom.latencyMs} ms.`}` : "Human managers scan once and choose their team."} Auto teams bid locally within league rules.</p>
         </section>
 
         <section class="auction-stage">
@@ -210,12 +246,13 @@ function render() {
             ${nextPlayers.length ? nextPlayers.map((item, index) => queueRow(item, index)).join("") : `<p class="empty-copy">No players left in the queue.</p>`}
           </div>
           <div class="queue-actions">
-            <button class="fantasy-pros-button" data-action="load-fantasy-pros" title="Replace the current draft with the supplied FantasyPros player list and auction values">
+            <button class="demo-data-button" data-action="load-demo-data" title="Replace the current draft with fictional demo players">
               ${icon("database")}
-              <span><strong>Load FantasyPros values</strong><small>${fantasyProsPlayers.length} players · resets draft</small></span>
+              <span><strong>Reload fictional demo players</strong><small>${seedPlayers.length} players · resets draft</small></span>
               ${icon("arrow")}
             </button>
             <button class="text-button csv-import-button" data-action="import">${icon("upload")} Or import player CSV</button>
+            <a class="text-button csv-import-button" href="/assets/player-template.csv" download>Download CSV template</a>
             <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
           </div>
         </aside>
@@ -237,7 +274,7 @@ function render() {
         <aside class="ledger-panel panel">
           <div class="panel-heading">
             <div><span class="eyebrow">DRAFT LEDGER</span><h2>Recent sales</h2></div>
-            <div class="ledger-tools"><button class="text-button" data-action="results">Results</button><button class="text-button" data-action="undo" ${state.sales.length ? "" : "disabled"}>Undo last</button></div>
+            <div class="ledger-tools"><button class="text-button" data-action="export-backup">Backup</button><button class="text-button" data-action="import-backup">Restore</button><button class="text-button" data-action="undo" ${state.sales.length ? "" : "disabled"}>Undo last</button><input id="backup-input" type="file" accept="application/json,.json" hidden /></div>
           </div>
           <div class="sales-list">
             ${state.sales.length ? [...state.sales].reverse().slice(0, 5).map(saleRow).join("") : `<p class="empty-copy">Every completed sale will appear here.</p>`}
@@ -249,7 +286,28 @@ function render() {
     <dialog id="setup-dialog">${setupDialog()}</dialog>
     <dialog id="csv-mapping-dialog">${pendingCsvImport ? csvMappingDialog() : ""}</dialog>
     <dialog id="audio-dialog">${audioDialog()}</dialog>
+    ${globalThis.sunGod?.isDesktop ? `<dialog id="onboarding-dialog">${onboardingDialog()}</dialog>` : ""}
   `;
+  if (openDialogId) window.setTimeout(() => document.querySelector(`#${openDialogId}`)?.showModal(), 0);
+}
+
+function onboardingDialog() {
+  return `<form id="onboarding-form" method="dialog">
+    <div class="dialog-head"><div><span class="eyebrow">PERSONAL LEAGUE</span><h2>Commissioner setup</h2></div></div>
+    <p>Sun God is local-first. Add your private relay settings for remote league members; league audio stays in your conferencing app.</p>
+    <div class="form-grid">
+      <label>Personal relay URL (optional)<input name="SUN_GOD_RELAY_URL" type="url" placeholder="https://your-relay.workers.dev" autocomplete="off" /></label>
+      <label>Personal relay admin secret<input name="SUN_GOD_RELAY_ADMIN_SECRET" type="password" autocomplete="off" /></label>
+      <label>OpenAI key (optional)<input name="OPENAI_API_KEY" type="password" autocomplete="off" /></label>
+      <label>ElevenLabs key (optional)<input name="ELEVENLABS_API_KEY" type="password" autocomplete="off" /></label>
+      <label>ElevenLabs voice ID<input name="ELEVENLABS_VOICE_ID" autocomplete="off" /></label>
+      <label>Cartesia key (optional)<input name="CARTESIA_API_KEY" type="password" autocomplete="off" /></label>
+    </div>
+    <label class="audio-enabled-row"><span><strong>Trusted network understood</strong><small>Local mode exposes the bidder page to devices on this Mac’s Wi-Fi.</small></span><input name="trusted" type="checkbox" required /><b></b></label>
+    <label class="audio-enabled-row"><span><strong>Backup test complete</strong><small>Use Backup in the ledger and keep the JSON somewhere safe.</small></span><input name="backup" type="checkbox" required /><b></b></label>
+    <label class="audio-enabled-row"><span><strong>Phone and speaker test complete</strong><small>Claim a sample team, bid on demo data, and background/foreground the phone.</small></span><input name="preflight" type="checkbox" required /><b></b></label>
+    <div class="dialog-actions"><button type="button" class="secondary-action" data-action="export-backup">Export backup test</button><button type="button" class="secondary-action" data-action="test-audio">Test speaker</button><button type="submit" class="primary-action">Finish setup</button></div>
+  </form>`;
 }
 
 function playerCard(player, highBidder, nominator) {
@@ -325,7 +383,7 @@ function teamBidButton(team, index) {
 function saleRow(sale) {
   const player = state.players.find((item) => item.id === sale.playerId);
   const team = state.teams.find((item) => item.id === sale.teamId);
-  return `<div class="sale-row"><span class="mini-position ${player.position.toLowerCase()}">${player.position}</span><span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(team.name)}</small></span><b>$${sale.amount}</b></div>`;
+  return `<button class="sale-row" data-action="correct-sale" data-sale-id="${escapeHtml(sale.id)}" ${emergencyLocked ? "" : "disabled"}><span class="mini-position ${escapeHtml(player.position.toLowerCase())}">${escapeHtml(player.position)}</span><span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(team.name)}</small></span><b>$${sale.amount}</b></button>`;
 }
 
 function setupDialog() {
@@ -339,12 +397,30 @@ function setupDialog() {
       ${["League", "Roster", "Nomination order"].map((label, index) => `<span data-progress-step="${index + 1}" class="${setupStep === index + 1 ? "is-active" : setupStep > index + 1 ? "is-done" : ""}"><i>${index + 1}</i>${label}</span>`).join("")}
     </div>
     <section class="setup-step ${setupStep === 1 ? "is-active" : ""}" data-setup-step="1">
-      <p>Set the salary-cap basics. The next two steps define legal rosters and who nominates.</p>
+      <p>Set the salary-cap basics and automatic count windows. The next two steps define legal rosters and who nominates.</p>
       <div class="form-grid">
         <label>Teams<input name="teamCount" type="number" min="2" max="12" value="${state.teams.length}" required /></label>
         <label>Budget per team<input name="budget" type="number" min="20" max="1000" value="${state.config.budget}" required /></label>
         <label>Bid increment<input name="increment" type="number" min="1" max="20" value="${state.config.increment}" required /></label>
       </div>
+      <fieldset class="countdown-settings">
+        <legend>AUTOMATIC COUNT WINDOWS</legend>
+        <p>Choose how long bidding stays open after each audible count.</p>
+        <div class="countdown-slider-grid">
+          ${countdownSlider({
+            name: "countdownOnceSeconds",
+            title: "Going once",
+            description: "Before going twice",
+            value: state.config.countdownOnceSeconds
+          })}
+          ${countdownSlider({
+            name: "countdownTwiceSeconds",
+            title: "Going twice",
+            description: "Before sold",
+            value: state.config.countdownTwiceSeconds
+          })}
+        </div>
+      </fieldset>
     </section>
     <section class="setup-step ${setupStep === 2 ? "is-active" : ""}" data-setup-step="2">
       <p>Set minimum position slots. FLEX accepts RB, WR, or TE; bench slots accept any position.</p>
@@ -409,6 +485,7 @@ function audioDialog() {
     ["elevenlabs", "ElevenLabs", providerOptionCopy("elevenlabs")],
     ["cartesia", "Cartesia Lucy", providerOptionCopy("cartesia")]
   ];
+  const selectedSpeedIndex = auctioneerSpeedIndex(auctioneerProfile.speed);
   return `<form id="audio-form" method="dialog">
     <div class="dialog-head"><div><span class="eyebrow">AUCTIONEER AUDIO</span><h2>Lucy’s booth</h2></div><button type="button" data-action="close-audio" class="dialog-close" aria-label="Close">×</button></div>
     <div class="audio-provider-card ${auctioneerService.provider === "browser" ? "is-fallback" : ""}">
@@ -424,17 +501,33 @@ function audioDialog() {
     </div></fieldset>
     <label class="audio-enabled-row"><span><strong>Auctioneer voice</strong><small>Keep announcements, countdowns, and rulings audible.</small></span><input name="enabled" type="checkbox" ${voiceEnabled ? "checked" : ""} /><b></b></label>
     <label class="audio-enabled-row play-by-play-row"><span><strong>Continuous play-by-play</strong><small data-patter-provider-message>${escapeHtml(patterDirectorLabel())} Bids wait for the current line; rulings interrupt.</small></span><input name="playByPlayEnabled" type="checkbox" ${auctioneerProfile.playByPlayEnabled ? "checked" : ""} /><b></b></label>
-    <label class="audio-enabled-row roast-enabled-row"><span><strong>Dark fantasy roasts</strong><small data-roast-provider-message>${escapeHtml(roastWriterLabel())} Dark, vulgar jokes target bids and draft decisions—not protected traits.</small></span><input name="roastingEnabled" type="checkbox" ${auctioneerProfile.roastingEnabled ? "checked" : ""} /><b></b></label>
+    <label class="audio-enabled-row roast-enabled-row"><span><strong>Dark fantasy roasts</strong><small data-roast-provider-message>${escapeHtml(roastWriterLabel())} A joke follows every completed sale and targets draft decisions—not protected traits.</small></span><input name="roastingEnabled" type="checkbox" ${auctioneerProfile.roastingEnabled ? "checked" : ""} /><b></b></label>
     <fieldset class="audio-fieldset"><legend>PERSONALITY</legend><div class="personality-grid">
       ${Object.entries(AUCTIONEER_PERSONALITIES).map(([id, profile]) => `<label class="personality-option"><input type="radio" name="personality" value="${id}" ${auctioneerProfile.personality === id ? "checked" : ""} /><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.description)}</small></span><i>✓</i></label>`).join("")}
     </div></fieldset>
     <fieldset class="audio-fieldset"><legend>ENERGY LEVEL</legend><div class="energy-grid">
       ${[[1, "Measured", "Calm pacing"], [2, "Draft night", "Balanced"], [3, "Full send", "Maximum lift"]].map(([value, name, copy]) => `<label><input type="radio" name="energy" value="${value}" ${auctioneerProfile.energy === value ? "checked" : ""} /><span><strong>${name}</strong><small>${copy}</small></span></label>`).join("")}
     </div></fieldset>
+    <fieldset class="audio-fieldset"><legend>TALKING SPEED</legend>
+      <label class="speed-slider">
+        <span><strong>Auctioneer pace</strong><output data-auctioneer-speed-output>${AUCTIONEER_SPEED_OPTIONS[selectedSpeedIndex].label}</output></span>
+        <input name="speedIndex" type="range" min="0" max="${AUCTIONEER_SPEED_OPTIONS.length - 1}" step="1" value="${selectedSpeedIndex}" data-auctioneer-speed-slider />
+        <i>${AUCTIONEER_SPEED_OPTIONS.map((option) => `<small>${option.label}</small>`).join("")}</i>
+      </label>
+    </fieldset>
     <div class="audio-preflight"><span><small>ROOM CHECK</small><strong data-audio-check>Make sure every manager can hear the auctioneer.</strong></span><button type="button" data-action="test-audio">${icon("volume")} Can you hear Lucy?</button></div>
     <div class="audio-cache-note">${icon("database")} Common countdown calls are cached after first playback. If realtime audio stalls, Sun God automatically finishes with a browser voice.</div>
     <div class="dialog-actions"><button type="button" data-action="close-audio" class="secondary-action">Cancel</button><button type="submit" class="primary-action">Save audio settings</button></div>
   </form>`;
+}
+
+function countdownSlider({ name, title, description, value }) {
+  const fallback = name === "countdownTwiceSeconds" ? DEFAULT_COUNTDOWN_SECONDS.twice : DEFAULT_COUNTDOWN_SECONDS.once;
+  const seconds = normalizeCountdownSeconds(value, fallback);
+  return `<label class="countdown-slider">
+    <span><strong>${title}</strong><small>${description}</small><output data-countdown-output>${seconds.toFixed(1)} sec</output></span>
+    <input name="${name}" type="range" min="2" max="20" step="0.1" value="${seconds}" data-countdown-slider />
+  </label>`;
 }
 
 function visualTieConfirmation() {
@@ -464,6 +557,12 @@ function wireGlobalEvents() {
         showSetupStep(1);
         return document.querySelector("#setup-dialog")?.showModal();
       }
+      if (action === "personal-settings") return document.querySelector("#onboarding-dialog")?.showModal();
+      if (action === "export-diagnostics") { await globalThis.sunGod.diagnostics.export(); return; }
+      if (action === "toggle-bidding-mode") return await toggleBiddingMode();
+      if (action === "phone-preflight") return await runPhonePreflight();
+      if (action === "emergency-lock") return toggleEmergencyLock();
+      if (action === "correct-sale") return correctHistoricalSale(button.dataset.saleId);
       if (action === "close-setup") return document.querySelector("#setup-dialog")?.close();
       if (action === "close-import") {
         pendingCsvImport = null;
@@ -494,8 +593,8 @@ function wireGlobalEvents() {
       if (action === "cancel-visual-tie") return cancelVisualTie();
       if (action === "dismiss-notice") return showNotice(null);
       if (action === "focus-phone-room") return document.querySelector("#phone-room-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      if (action === "copy-phone-link") return copyPhoneJoinLink();
-      if (action === "reset-phone-claims") return resetPhoneClaims();
+      if (action === "copy-phone-link") return await copyPhoneJoinLink();
+      if (action === "reset-phone-claims") return await resetPhoneClaims();
       if (action === "nominate") return await selectNomination(button.dataset.playerId);
       if (action === "open") return beginAuction();
       if (action === "pause") { clearTimer(); clearAutoDraftTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
@@ -509,7 +608,9 @@ function wireGlobalEvents() {
         return await prepareAutoIntents();
       }
       if (action === "results") return await openResultsPage();
-      if (action === "load-fantasy-pros") return loadFantasyProsPreset();
+      if (action === "export-backup") return exportDraftBackup();
+      if (action === "import-backup") return document.querySelector("#backup-input")?.click();
+      if (action === "load-demo-data") return loadDemoPreset();
       if (action === "import") return document.querySelector("#csv-input")?.click();
     } catch (error) {
       showNotice({ kind: "error", message: error.message });
@@ -526,14 +627,37 @@ function wireGlobalEvents() {
       void importCsv(event.target.files?.[0]);
       event.target.value = "";
     }
+    if (event.target.id === "backup-input") {
+      void importDraftBackup(event.target.files?.[0]);
+      event.target.value = "";
+    }
   });
 
   app.addEventListener("input", (event) => {
     if (event.target.id === "player-search") renderSearchResults(event.target.value);
     if (event.target.name === "teamCount" || event.target.name === "teamNames") syncAutodraftTeamSetup();
+    if (event.target.matches("[data-countdown-slider]")) {
+      const output = event.target.closest(".countdown-slider")?.querySelector("[data-countdown-output]");
+      if (output) output.textContent = `${Number(event.target.value).toFixed(1)} sec`;
+    }
+    if (event.target.matches("[data-auctioneer-speed-slider]")) {
+      const output = event.target.closest(".speed-slider")?.querySelector("[data-auctioneer-speed-output]");
+      if (output) output.textContent = auctioneerSpeedAt(event.target.value).label;
+    }
   });
 
   app.addEventListener("submit", (event) => {
+    if (event.target.id === "onboarding-form") {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      const credentials = Object.fromEntries(["SUN_GOD_RELAY_URL", "SUN_GOD_RELAY_ADMIN_SECRET", "OPENAI_API_KEY", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "CARTESIA_API_KEY"].map((key) => [key, String(data.get(key) || "").trim()]).filter(([, value]) => value));
+      void globalThis.sunGod.credentials.set(credentials).then(() => {
+        localStorage.setItem(PERSONAL_SETUP_STORAGE_KEY, "complete");
+        document.querySelector("#onboarding-dialog")?.close();
+        showNotice({ kind: "success", message: "Personal setup saved. Restart once if you added relay or provider settings." });
+      }).catch((error) => showNotice({ kind: "error", message: error.message }));
+      return;
+    }
     if (event.target.id === "audio-form") {
       event.preventDefault();
       const data = new FormData(event.target);
@@ -543,7 +667,8 @@ function wireGlobalEvents() {
         roastingEnabled: data.get("roastingEnabled") === "on",
         provider: ["auto", "elevenlabs", "cartesia"].includes(data.get("provider")) ? data.get("provider") : "auto",
         personality: AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic",
-        energy: Math.min(3, Math.max(1, Number(data.get("energy")) || 2))
+        energy: Math.min(3, Math.max(1, Number(data.get("energy")) || 2)),
+        speed: auctioneerSpeedAt(data.get("speedIndex")).id
       };
       voiceEnabled = auctioneerProfile.enabled;
       auctioneerScript = createAuctioneerScript(auctioneerProfile);
@@ -556,7 +681,7 @@ function wireGlobalEvents() {
       document.querySelector("#audio-dialog")?.close();
       render();
       resumeAuctionFlow();
-      showNotice({ kind: "success", message: `${AUCTIONEER_PERSONALITIES[auctioneerProfile.personality].name} is at energy ${auctioneerProfile.energy}; play-by-play ${auctioneerProfile.playByPlayEnabled ? "on" : "off"}, roasts ${auctioneerProfile.roastingEnabled ? "on" : "off"}.` });
+      showNotice({ kind: "success", message: `${AUCTIONEER_PERSONALITIES[auctioneerProfile.personality].name} is set to ${auctioneerSpeedAt(data.get("speedIndex")).label.toLowerCase()} speed at energy ${auctioneerProfile.energy}; play-by-play ${auctioneerProfile.playByPlayEnabled ? "on" : "off"}, roasts ${auctioneerProfile.roastingEnabled ? "on" : "off"}.` });
       return;
     }
     if (event.target.id === "csv-mapping-form") {
@@ -581,6 +706,8 @@ function wireGlobalEvents() {
           rosterSize: state.config.rosterSize,
           increment: state.config.increment,
           rosterRequirements: normalizedRequirements(),
+          countdownOnceSeconds: state.config.countdownOnceSeconds,
+          countdownTwiceSeconds: state.config.countdownTwiceSeconds,
           nominationOrder: state.nomination?.order
         });
         persistDraft();
@@ -599,6 +726,8 @@ function wireGlobalEvents() {
     const teamCount = Number(data.get("teamCount"));
     const budget = Number(data.get("budget"));
     const increment = Number(data.get("increment"));
+    const countdownOnceSeconds = normalizeCountdownSeconds(data.get("countdownOnceSeconds"), DEFAULT_COUNTDOWN_SECONDS.once);
+    const countdownTwiceSeconds = normalizeCountdownSeconds(data.get("countdownTwiceSeconds"), DEFAULT_COUNTDOWN_SECONDS.twice);
     const rosterRequirements = Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(data.get(`position_${position}`)) || 0]));
     const benchSlots = Number(data.get("benchSlots")) || 0;
     const rosterSize = Object.values(rosterRequirements).reduce((sum, value) => sum + value, benchSlots);
@@ -626,6 +755,8 @@ function wireGlobalEvents() {
       rosterSize,
       increment,
       rosterRequirements,
+      countdownOnceSeconds,
+      countdownTwiceSeconds,
       nominationOrder: teams.map((team) => team.id)
     });
     clearVisualBidWindow();
@@ -633,7 +764,7 @@ function wireGlobalEvents() {
     persistDraft();
     document.querySelector("#setup-dialog")?.close();
     render();
-    void initializePhoneRoom();
+    void initializeBiddingRoom();
     scheduleAutoNomination();
   });
 
@@ -685,7 +816,7 @@ async function prepareAutoIntents() {
   const requestId = ++autoIntentRequestSequence;
   const playerId = state.auction.playerId;
   try {
-    const response = await fetch("/api/autodraft/intent", {
+    const response = await hostFetch("/api/autodraft/intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -824,10 +955,18 @@ function runCountdownStep(force = false) {
     const team = state.teams.find((item) => item.id === state.auction.highBidderId);
     const sale = state.sales.at(-1);
     const context = saleRoastContext(player, team, state.auction.amount);
-    speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), () => {
-      void maybeSpeakSaleRoast(sale?.id, context);
-    }, { style: "sold", priority: SPEECH_PRIORITY.sold });
-    scheduleAutoNomination();
+    const roastPromise = prepareSaleRoast(sale?.id, context);
+    let saleAnnouncementFinished = false;
+    const finishSaleAnnouncement = () => {
+      if (saleAnnouncementFinished) return;
+      saleAnnouncementFinished = true;
+      void finishSaleAnnouncementWithRoast(sale?.id, roastPromise);
+    };
+    speak(auctioneerScript.sold({ player, team, amount: state.auction.amount }), finishSaleAnnouncement, {
+      style: "sold",
+      priority: SPEECH_PRIORITY.sold,
+      onCancel: finishSaleAnnouncement
+    });
   } else if (state.auction.phase === "passed" && before === "open") {
     speak(auctioneerScript.passed(currentPlayer(state)), null, { style: "passed", priority: SPEECH_PRIORITY.sold });
     scheduleAutoNomination();
@@ -837,7 +976,7 @@ function runCountdownStep(force = false) {
 function scheduleCountdown() {
   clearTimer();
   if (!autoEnabled || pendingVisualTie || visualBidWindow || !["open", "once", "twice"].includes(state.auction.phase)) return;
-  const delay = COUNTDOWN_DELAYS[state.auction.phase];
+  const delay = countdownDelayMs(state.config, state.auction.phase);
   countdownTimer = window.setTimeout(runCountdownStep, delay);
 }
 
@@ -908,7 +1047,7 @@ async function refillPatterQueue() {
   const requestId = ++patterRequestSequence;
   patterRequest = { key, requestId };
   try {
-    const response = await fetch("/api/auctioneer/patter", {
+    const response = await hostFetch("/api/auctioneer/patter", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -976,7 +1115,7 @@ function clearPatter() {
   patterTimer = null;
 }
 
-function speak(text, onDone, { style = "neutral", priority = 0, interrupt = true, queueKey = null } = {}) {
+function speak(text, onDone, { style = "neutral", priority = 0, interrupt = true, queueKey = null, onCancel } = {}) {
   if (!voiceEnabled) { onDone?.(); return; }
   auctioneerVoice.speak(text, {
     style,
@@ -985,6 +1124,8 @@ function speak(text, onDone, { style = "neutral", priority = 0, interrupt = true
     queueKey,
     personality: auctioneerProfile.personality,
     energy: auctioneerProfile.energy,
+    speed: auctioneerProfile.speed,
+    onCancel,
     onDone
   });
 }
@@ -1008,21 +1149,24 @@ function saleRoastContext(player, team, amount) {
     amount,
     suggestedValue: player?.suggestedValue,
     budgetRemaining: team?.budget,
+    budgetBeforePurchase: Number(team?.budget || 0) + Number(amount || 0),
     rosterCount: roster.length,
     rosterSize: state.config.rosterSize,
+    bidCount: state.auction.bidCount,
+    saleNumber: state.sales.length,
     roster
   };
 }
 
-async function maybeSpeakSaleRoast(saleId, context) {
+async function prepareSaleRoast(saleId, context) {
   if (
     !saleId
     || !voiceEnabled
     || !auctioneerProfile.roastingEnabled
     || !shouldRoastSale(context)
-  ) return;
+  ) return null;
   try {
-    const response = await fetch("/api/auctioneer/roast", {
+    const response = await hostFetch("/api/auctioneer/roast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1032,11 +1176,23 @@ async function maybeSpeakSaleRoast(saleId, context) {
       })
     });
     const payload = await response.json().catch(() => ({}));
-    const saleStillCurrent = state.auction.phase === "sold" && state.sales.at(-1)?.id === saleId;
-    if (!response.ok || !saleStillCurrent || !voiceEnabled || !auctioneerProfile.roastingEnabled || !payload.text) return;
+    const saleStillExists = state.sales.some((sale) => sale.id === saleId);
+    if (!response.ok || !saleStillExists || !voiceEnabled || !auctioneerProfile.roastingEnabled || !payload.text) return null;
     recentRoasts = [...recentRoasts, String(payload.text)].slice(-20);
-    speak(payload.text, null, { style: "roast", priority: SPEECH_PRIORITY.roast });
-  } catch {}
+    return String(payload.text);
+  } catch {
+    return null;
+  }
+}
+
+async function finishSaleAnnouncementWithRoast(saleId, roastPromise) {
+  const roast = await roastPromise;
+  if (emergencyLocked) return;
+  const saleStillExists = state.sales.some((sale) => sale.id === saleId);
+  if (roast && saleStillExists && voiceEnabled && auctioneerProfile.roastingEnabled) {
+    speak(roast, null, { style: "roast", priority: SPEECH_PRIORITY.roast });
+  }
+  scheduleAutoNomination();
 }
 
 async function runAudioPreflight(button) {
@@ -1045,6 +1201,7 @@ async function runAudioPreflight(button) {
   const data = new FormData(form);
   const personality = AUCTIONEER_PERSONALITIES[data.get("personality")] ? data.get("personality") : "classic";
   const energy = Math.min(3, Math.max(1, Number(data.get("energy")) || 2));
+  const speed = auctioneerSpeedAt(data.get("speedIndex")).id;
   const provider = ["auto", "elevenlabs", "cartesia"].includes(data.get("provider")) ? data.get("provider") : "auto";
   const check = form.querySelector("[data-audio-check]");
   clearPatter();
@@ -1058,6 +1215,7 @@ async function runAudioPreflight(button) {
     priority: SPEECH_PRIORITY.preflight,
     personality,
     energy,
+    speed,
     onDone: () => {
       if (check?.isConnected) check.textContent = "Audio check complete. Ask the room for a thumbs-up.";
       if (button?.isConnected) button.disabled = false;
@@ -1075,7 +1233,7 @@ function updateAudioServiceStatus() {
   card?.classList.toggle("is-fallback", auctioneerService.provider === "browser");
   if (label) label.textContent = audioProviderLabel();
   if (message) message.textContent = auctioneerService.message;
-  if (roastMessage) roastMessage.textContent = `${roastWriterLabel()} Dark, vulgar jokes target bids and draft decisions—not protected traits.`;
+  if (roastMessage) roastMessage.textContent = `${roastWriterLabel()} A joke follows every completed sale and targets draft decisions—not protected traits.`;
   if (patterMessage) patterMessage.textContent = `${patterDirectorLabel()} Bids wait for the current line; rulings interrupt.`;
 }
 
@@ -1085,15 +1243,23 @@ function stopAuctioneer() {
 }
 
 function handlePhoneBid(bid) {
-  if (!bid?.teamId || !["open", "once", "twice"].includes(state.auction.phase)) return;
+  if (!bid?.teamId) return;
+  if (!["open", "once", "twice"].includes(state.auction.phase)) {
+    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount: Number(bid.amount), status: "rejected" });
+    return;
+  }
+  if (!canPlaceVisualBid(bid.teamId, Number(bid.amount))) {
+    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount: Number(bid.amount), status: "rejected" });
+    return;
+  }
   if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
-  collectExternalBids([{ teamId: bid.teamId, amount: bid.amount }], "phone", bid.receivedAt);
+  collectExternalBids([{ teamId: bid.teamId, amount: bid.amount, messageId: bid.participantMessageId || bid.id }], "phone", bid.receivedAt);
 }
 
 function collectExternalBids(bids, source, receivedAt = Date.now()) {
   const allowedTeamIds = pendingVisualTie ? new Set(pendingVisualTie.teamIds) : null;
   const eligibleBids = bids
-    .map((bid) => ({ teamId: bid?.teamId, amount: Number(bid?.amount) }))
+    .map((bid) => ({ teamId: bid?.teamId, amount: Number(bid?.amount), messageId: bid?.messageId }))
     .filter((bid) => bid.teamId && (!allowedTeamIds || allowedTeamIds.has(bid.teamId)))
     .filter((bid) => canPlaceVisualBid(bid.teamId, bid.amount));
 
@@ -1122,14 +1288,21 @@ function resolveVisualBidWindow() {
   const bids = [...batch.bids.values()].filter((bid) => canPlaceVisualBid(bid.teamId, bid.amount));
   const result = classifyPhoneBidBatch(bids);
   if (result.kind === "none") {
+    publishRelayBidResults(batch, result);
     pendingVisualTie = null;
     render();
     resumeAuctionFlow();
     return;
   }
   if (result.kind === "bid") {
-    try { submitBid(result.teamId, result.amount, { source: batch.source }); }
-    catch (error) { showNotice({ kind: "error", message: error.message }); resumeAuctionFlow(); }
+    try {
+      submitBid(result.teamId, result.amount, { source: batch.source });
+      publishRelayBidResults(batch, result);
+    } catch (error) {
+      publishRelayBidResults(batch, { kind: "none" });
+      showNotice({ kind: "error", message: error.message });
+      resumeAuctionFlow();
+    }
     return;
   }
 
@@ -1139,6 +1312,7 @@ function resolveVisualBidWindow() {
     source: batch.source,
     round: batch.runoffRound + 1
   };
+  publishRelayBidResults(batch, result);
   render();
   schedulePhoneRoomSync();
   const managers = result.teamIds
@@ -1146,6 +1320,20 @@ function resolveVisualBidWindow() {
     .filter(Boolean)
     .join(" and ");
   speak(auctioneerScript.simultaneous({ amount: result.amount, managers }), null, { style: "ruling", priority: SPEECH_PRIORITY.ruling });
+}
+
+function publishRelayBidResults(batch, result) {
+  if (phoneRoom.mode !== "remote" || !phoneRoomTransport?.notify) return;
+  for (const bid of batch?.bids?.values?.() || []) {
+    const tied = result.kind === "tie" && result.teamIds.includes(bid.teamId) && bid.amount === result.amount;
+    const accepted = result.kind === "bid" && result.teamId === bid.teamId && bid.amount === result.amount;
+    phoneRoomTransport.notify("bid.result", {
+      teamId: bid.teamId,
+      participantMessageId: bid.messageId,
+      amount: bid.amount,
+      status: tied ? "tie pending" : accepted ? "accepted" : "outbid"
+    });
+  }
 }
 
 function canPlaceVisualBid(teamId, amount) {
@@ -1180,6 +1368,11 @@ function clearVisualBidWindow() {
   visualBidWindow = null;
 }
 
+async function initializeBiddingRoom() {
+  if (phoneRoom.mode === "remote") return initializeRelayRoom();
+  return initializePhoneRoom();
+}
+
 async function initializePhoneRoom() {
   phoneRoom.status = "starting";
   phoneRoom.error = null;
@@ -1187,7 +1380,9 @@ async function initializePhoneRoom() {
   localStorage.setItem(PHONE_ROOM_HOST_KEY_STORAGE_KEY, phoneRoom.hostKey);
   render();
   try {
-    const snapshot = await postPhoneJson("/api/phone-room/upsert", {
+    phoneRoomTransport?.close();
+    phoneRoomTransport = new LanRoomTransport({ roomId: phoneRoom.roomId, hostFetchImpl: hostFetch });
+    const snapshot = await phoneRoomTransport.createRoom({
       roomId: phoneRoom.roomId,
       hostKey: phoneRoom.hostKey,
       teams: state.teams.map((team) => ({
@@ -1210,22 +1405,127 @@ async function initializePhoneRoom() {
   }
 }
 
-function connectPhoneRoomEvents() {
-  phoneRoomEvents?.close();
-  phoneRoomEvents = new EventSource(`/api/phone-room/events?room=${encodeURIComponent(phoneRoom.roomId)}`);
-  for (const eventName of ["snapshot", "room", "state"]) {
-    phoneRoomEvents.addEventListener(eventName, (event) => {
-      const payload = JSON.parse(event.data);
-      applyPhoneRoomSnapshot(payload.room, { renderIfChanged: true });
-    });
+async function initializeRelayRoom() {
+  phoneRoom.status = "starting";
+  phoneRoom.error = null;
+  render();
+  phoneRoomTransport?.close();
+  phoneRoomTransport = new RelayRoomTransport({
+    baseUrl: phoneRoom.relayUrl,
+    roomId: phoneRoom.roomId,
+    role: "host",
+    credential: phoneRoom.relaySecret
+  });
+  phoneRoomTransport.connect((message) => {
+    if (message.type === "room.snapshot") {
+      const claimed = new Set(message.claims || []);
+      applyPhoneRoomSnapshot({ ...message.room, teams: (message.room?.teams || []).map((team) => ({ ...team, claimed: claimed.has(team.id) })) }, { renderIfChanged: true });
+    } else if (message.type === "bid.proposed") handlePhoneBid(message);
+    else if (message.type === "heartbeat.ack" && message.sentAt) {
+      phoneRoom.latencyMs = Date.now() - Number(message.sentAt);
+      render();
+    }
+  }, ({ state: connectionState, error }) => {
+    if (connectionState === "connected") {
+      phoneRoom.status = "live";
+      phoneRoom.error = null;
+      render();
+      void syncPhoneRoomState();
+      measureRelayLatency();
+    } else if (connectionState === "error") {
+      phoneRoom.status = "error";
+      phoneRoom.error = error || "The remote bidding relay could not authenticate this room.";
+      showNotice({ kind: "error", message: phoneRoom.error });
+    } else {
+      phoneRoom.status = connectionState === "connecting" ? "starting" : "reconnecting";
+      clearTimer();
+      clearAutoDraftTimer();
+      if (connectionState !== "connecting" && isLiveAuctionPhase(state.auction.phase)) {
+        state = pauseAuction(state);
+        persistDraft();
+      }
+      render();
+    }
+  });
+}
+
+async function toggleBiddingMode() {
+  if (!["idle", "sold", "passed", "paused"].includes(state.auction.phase)) throw new Error("Pause the auction before changing phone transport modes.");
+  clearTimer();
+  clearAutoDraftTimer();
+  if (phoneRoom.mode === "remote") {
+    try { await phoneRoomTransport?.closeRoom?.(); } catch {}
+    phoneRoomTransport?.close();
+    phoneRoom.mode = "local";
+    phoneRoom.roomId = createRoomCode();
+    phoneRoom.joinUrl = "";
+    phoneRoom.claimedTeamIds = [];
+    await globalThis.sunGod?.relaySession?.set?.(null);
+    return initializePhoneRoom();
   }
-  phoneRoomEvents.addEventListener("bid", (event) => handlePhoneBid(JSON.parse(event.data)));
-  phoneRoomEvents.onopen = () => {
-    if (phoneRoom.status !== "live") { phoneRoom.status = "live"; phoneRoom.error = null; render(); }
+  const meetingLink = window.prompt("Optional HTTPS link for your Zoom, Meet, Discord, or FaceTime call:", phoneRoom.meetingLink || "")?.trim() || "";
+  if (meetingLink && !/^https:\/\//i.test(meetingLink)) throw new Error("The league call link must start with https://.");
+  const previousStatus = phoneRoom.status;
+  phoneRoom.status = "starting";
+  phoneRoom.error = null;
+  render();
+  let relay;
+  try {
+    const response = await hostFetch("/api/relay-room", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    relay = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(relay.error || "The personal relay could not create a room.");
+    await globalThis.sunGod?.relaySession?.set?.({ ...relay, meetingLink });
+  } catch (error) {
+    phoneRoom.status = previousStatus;
+    phoneRoom.error = error.message;
+    render();
+    throw error;
+  }
+  phoneRoomTransport?.close();
+  phoneRoom = {
+    ...phoneRoom, mode: "remote", roomId: relay.roomId, relayUrl: relay.relayUrl,
+    relaySecret: relay.hostSessionSecret, joinUrl: relay.bidderUrl, meetingLink,
+    claimedTeamIds: [], latencyMs: null, status: "starting", error: null
   };
-  phoneRoomEvents.onerror = () => {
-    if (phoneRoom.status !== "reconnecting") { phoneRoom.status = "reconnecting"; render(); }
-  };
+  return initializeRelayRoom();
+}
+
+async function measureRelayLatency() {
+  if (phoneRoom.mode !== "remote" || phoneRoom.status !== "live") return;
+  const sentAt = Date.now();
+  try {
+    await phoneRoomTransport.request("heartbeat", { sentAt });
+    phoneRoom.latencyMs = Date.now() - sentAt;
+    render();
+  } catch {}
+}
+
+async function runPhonePreflight() {
+  const checks = [
+    ["Durable draft save", !durableSaveFailed],
+    ["Phone transport connected", phoneRoom.status === "live"],
+    ["At least one human phone claimed", phoneRoom.claimedTeamIds.length > 0]
+  ];
+  if (phoneRoom.mode === "remote") {
+    await measureRelayLatency();
+    checks.push(["Relay round trip below 500 ms", Number(phoneRoom.latencyMs) > 0 && Number(phoneRoom.latencyMs) < 500]);
+    checks.push(["League call link configured", /^https:\/\//i.test(phoneRoom.meetingLink)]);
+  }
+  const failures = checks.filter(([, passed]) => !passed).map(([label]) => label);
+  if (failures.length) throw new Error(`Preflight needs attention: ${failures.join("; ")}. Claim a phone, submit a sample bid with a demo player, background/foreground it, and retry.`);
+  showNotice({ kind: "success", message: `${phoneRoom.mode === "remote" ? "Remote" : "Local"} preflight passed. Complete one sample bid and phone background/foreground check before the real auction.` });
+}
+
+function connectPhoneRoomEvents() {
+  phoneRoomTransport.connect((payload) => {
+    if (["snapshot", "room", "state"].includes(payload.type)) {
+      applyPhoneRoomSnapshot(payload.room, { renderIfChanged: true });
+    } else if (payload.type === "bid") handlePhoneBid(payload);
+  }, ({ state: connectionState }) => {
+    if (connectionState === "connected") {
+      if (phoneRoom.status !== "live") { phoneRoom.status = "live"; phoneRoom.error = null; render(); }
+    } else if (phoneRoom.status !== "reconnecting") { phoneRoom.status = "reconnecting"; render(); }
+  });
 }
 
 function applyPhoneRoomSnapshot(snapshot, { renderIfChanged = false } = {}) {
@@ -1250,9 +1550,9 @@ async function syncPhoneRoomState() {
   phoneRoomSyncTimer = null;
   const player = currentPlayer(state);
   try {
-    await postPhoneJson("/api/phone-room/state", {
+    const publicRoom = {
       roomId: phoneRoom.roomId,
-      hostKey: phoneRoom.hostKey,
+      meetingLink: phoneRoom.mode === "remote" ? phoneRoom.meetingLink : "",
       auction: {
         phase: state.auction.phase,
         amount: state.auction.amount,
@@ -1262,23 +1562,20 @@ async function syncPhoneRoomState() {
         player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam, suggestedValue: player.suggestedValue } : null
       },
       teams: state.teams.map((team) => ({
-        id: team.id,
-        budget: team.budget,
-        rosterCount: team.roster.length,
-        rosterSize: state.config.rosterSize,
-        eligibleForPlayer: !player || canTeamRosterPlayer(state, team.id, player.id),
-        maxBid: maxBidForTeam(state, team.id),
+        id: team.id, name: team.name, manager: team.manager, color: team.color, autoDraft: isAutoTeam(team),
+        budget: team.budget, rosterCount: team.roster.length, rosterSize: state.config.rosterSize,
+        eligibleForPlayer: !player || canTeamRosterPlayer(state, team.id, player.id), maxBid: maxBidForTeam(state, team.id),
         roster: team.roster.map((spot) => {
           const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
-          return {
-            playerId: spot.playerId,
-            name: rosterPlayer?.name || "Unknown player",
-            position: rosterPlayer?.position || "FLEX",
-            nflTeam: rosterPlayer?.nflTeam || "FA",
-            price: spot.price
-          };
+          return { playerId: spot.playerId, name: rosterPlayer?.name || "Unknown player", position: rosterPlayer?.position || "FLEX", nflTeam: rosterPlayer?.nflTeam || "FA", price: spot.price };
         })
       }))
+    };
+    await phoneRoomTransport.publishState(phoneRoom.mode === "remote" ? { room: publicRoom } : {
+      roomId: phoneRoom.roomId,
+      hostKey: phoneRoom.hostKey,
+      auction: publicRoom.auction,
+      teams: publicRoom.teams
     });
   } catch (error) {
     phoneRoom.status = "reconnecting";
@@ -1298,17 +1595,11 @@ async function copyPhoneJoinLink() {
 }
 
 async function resetPhoneClaims() {
-  const snapshot = await postPhoneJson("/api/phone-room/reset-claims", { roomId: phoneRoom.roomId, hostKey: phoneRoom.hostKey });
+  if (phoneRoom.mode === "remote") throw new Error("Remote claims are reset by closing and creating a new relay room.");
+  const snapshot = await phoneRoomTransport.resetClaims({ roomId: phoneRoom.roomId, hostKey: phoneRoom.hostKey });
   applyPhoneRoomSnapshot(snapshot);
   render();
   showNotice({ kind: "success", message: "All phones were disconnected from their teams." });
-}
-
-async function postPhoneJson(url, body) {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "The phone bidding room is unavailable.");
-  return payload;
 }
 
 function renderSearchResults(query) {
@@ -1342,25 +1633,27 @@ async function openResultsPage() {
   window.location.assign(`./results.html#${encoded}`);
 }
 
-function loadFantasyProsPreset() {
+function loadDemoPreset() {
   clearTimer();
   clearAutoDraftTimer();
   stopAuctioneer();
   clearVisualBidWindow();
   pendingVisualTie = null;
   state = createDraft({
-    players: fantasyProsPlayers,
+    players: seedPlayers,
     teams: state.teams.map((team) => ({ ...team, roster: [] })),
     budget: state.config.budget,
     rosterSize: state.config.rosterSize,
     increment: state.config.increment,
     rosterRequirements: normalizedRequirements(),
+    countdownOnceSeconds: state.config.countdownOnceSeconds,
+    countdownTwiceSeconds: state.config.countdownTwiceSeconds,
     nominationOrder: state.nomination?.order
   });
   persistDraft();
   render();
   scheduleAutoNomination();
-  showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} FantasyPros players and auction values. The draft is ready.` });
+  showNotice({ kind: "success", message: `Loaded ${seedPlayers.length} fictional demo players. The draft is ready.` });
 }
 
 function update(nextState, message) {
@@ -1370,6 +1663,37 @@ function update(nextState, message) {
   if (message) showNotice({ kind: "success", message });
 }
 
+function toggleEmergencyLock() {
+  clearTimer();
+  clearAutoDraftTimer();
+  stopAuctioneer();
+  if (!emergencyLocked) {
+    state = pauseAuction(state);
+    emergencyLocked = true;
+    persistDraft();
+    showNotice({ kind: "error", message: "Emergency lock is active. Bidding is paused and sale corrections are enabled." });
+  } else {
+    emergencyLocked = false;
+    render();
+  }
+}
+
+function correctHistoricalSale(saleId) {
+  if (!emergencyLocked) throw new Error("Activate the emergency lock before correcting a sale.");
+  const sale = state.sales.find((item) => item.id === saleId);
+  if (!sale) throw new Error("That sale no longer exists.");
+  const teamOptions = state.teams.map((team, index) => `${index + 1}: ${team.name}`).join("\n");
+  const answer = window.prompt(`Enter buyer number and price, such as 3,42. Enter RETURN to put the player back in the pool.\n\n${teamOptions}`, `${state.teams.findIndex((team) => team.id === sale.teamId) + 1},${sale.amount}`);
+  if (answer == null) return;
+  if (answer.trim().toUpperCase() === "RETURN") {
+    update(correctSale(state, saleId, { returnToPool: true }), "Sale removed and player returned to the pool.");
+    return;
+  }
+  const [teamNumber, price] = answer.split(",").map((value) => Number(value.trim()));
+  const team = state.teams[teamNumber - 1];
+  update(correctSale(state, saleId, { teamId: team?.id, amount: price }), "Sale corrected and all budgets and rosters rebuilt.");
+}
+
 function showNotice(nextNotice) {
   notice = nextNotice;
   render();
@@ -1377,8 +1701,56 @@ function showNotice(nextNotice) {
 }
 
 function persistDraft() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const snapshot = structuredClone(state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  draftSavePromise = draftSavePromise.catch(() => {}).then(async () => {
+    const response = await hostFetch("/api/draft-state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: snapshot, expectedRevision: draftRevision })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Draft saving failed.");
+    draftRevision = payload.revision;
+    durableSaveFailed = false;
+    localStorage.removeItem(STORAGE_KEY);
+  }).catch((error) => {
+    durableSaveFailed = true;
+    clearTimer();
+    clearAutoDraftTimer();
+    if (isLiveAuctionPhase(state.auction.phase)) state = pauseAuction(state);
+    notice = { kind: "error", message: `${error.message} The auction is paused; export an emergency backup before continuing.` };
+    render();
+  });
   schedulePhoneRoomSync();
+}
+
+function exportDraftBackup() {
+  const backup = { format: "sun-god-emergency-backup-v1", exportedAt: Date.now(), revision: draftRevision, saveFailed: durableSaveFailed, state };
+  const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `sun-god-draft-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function importDraftBackup(file) {
+  if (!file) return;
+  try {
+    const backup = JSON.parse(await file.text());
+    const response = await hostFetch("/api/draft-backup/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(backup)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "The backup could not be restored.");
+    localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
+  } catch (error) {
+    showNotice({ kind: "error", message: error.message });
+  }
 }
 
 function phoneRoomStatusLabel() {
@@ -1435,21 +1807,24 @@ function patterDirectorLabel() {
 
 function roastWriterLabel() {
   return auctioneerService.roasting?.provider === "openai"
-    ? "OpenAI riffs on the live bidding context."
-    : "Lucy uses the built-in contextual roast rotation.";
+    ? "OpenAI edits each joke against the player, price, and draft-sheet value."
+    : "Lucy uses price-aware built-in jokes when OpenAI is unavailable.";
 }
 
-function restoreDraft() {
+function restoreDraft(source = undefined) {
   try {
-    const restored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const restored = source === undefined ? JSON.parse(localStorage.getItem(STORAGE_KEY)) : structuredClone(source);
     if (!restored) return null;
     restored.config = {
       ...restored.config,
-      rosterRequirements: Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(restored.config?.rosterRequirements?.[position]) || 0]))
+      rosterRequirements: Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Number(restored.config?.rosterRequirements?.[position]) || 0])),
+      countdownOnceSeconds: normalizeCountdownSeconds(restored.config?.countdownOnceSeconds, DEFAULT_COUNTDOWN_SECONDS.once),
+      countdownTwiceSeconds: normalizeCountdownSeconds(restored.config?.countdownTwiceSeconds, DEFAULT_COUNTDOWN_SECONDS.twice)
     };
     restored.teams = (restored.teams || []).map((team) => ({ ...team, controller: autoTeamController(team.controller) }));
     restored.nomination ||= { order: restored.teams.map((team) => team.id), currentIndex: 0 };
     restored.auction = { nominatorTeamId: null, autoIntents: {}, autoIntentStatus: "idle", ...restored.auction };
+    validateDraftState(restored);
     return restored;
   } catch { return null; }
 }
@@ -1463,9 +1838,31 @@ function restoreAuctioneerProfile() {
       roastingEnabled: saved?.roastingEnabled !== false,
       provider: ["auto", "elevenlabs", "cartesia"].includes(saved?.provider) ? saved.provider : "auto",
       personality: AUCTIONEER_PERSONALITIES[saved?.personality] ? saved.personality : "classic",
-      energy: Math.min(3, Math.max(1, Number(saved?.energy) || 2))
+      energy: Math.min(3, Math.max(1, Number(saved?.energy) || 2)),
+      speed: normalizeAuctioneerSpeed(saved?.speed)
     };
-  } catch { return { enabled: true, playByPlayEnabled: true, roastingEnabled: true, provider: "auto", personality: "classic", energy: 2 }; }
+  } catch { return { enabled: true, playByPlayEnabled: true, roastingEnabled: true, provider: "auto", personality: "classic", energy: 2, speed: "normal" }; }
+}
+
+async function loadHostSession() {
+  if (globalThis.sunGod?.hostToken) return globalThis.sunGod.hostToken;
+  const response = await fetch("/api/host-session", { method: "POST", cache: "no-store" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.token) throw new Error(payload.error || "Open the commissioner app on this Mac to continue.");
+  return payload.token;
+}
+
+async function loadDurableDraft() {
+  const response = await hostFetch("/api/draft-state", { cache: "no-store" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Durable draft storage is unavailable.");
+  return payload;
+}
+
+function hostFetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("Authorization", `Bearer ${hostToken}`);
+  return fetch(input, { ...init, headers });
 }
 
 function normalizedRequirements() {
@@ -1537,6 +1934,7 @@ function escapeHtml(value = "") {
 function icon(name) {
   const paths = {
     phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 5h4M11 18h2"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 3 3m-6 0 3 3"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     camera: '<path d="M14.5 5 13 3H7L5.5 5H3a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-6.5Z"/><circle cx="10" cy="12" r="4"/>',
     volume: '<path d="M11 5 6 9H2v6h4l5 4V5ZM15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/>',

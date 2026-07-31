@@ -12,9 +12,23 @@ The launcher uses Node from your shell when available and otherwise uses the Nod
 
 Then open `http://localhost:4173` in Chrome. Keep the laptop and bidder phones on the same Wi-Fi network.
 
+For the personal desktop build, run `pnpm desktop` during development or `pnpm dist:mac` to produce an Apple-Silicon DMG. The app has no license, payment, account, or expiration gate. Relay and provider credentials entered in the desktop setup are encrypted with Electron `safeStorage` and macOS Keychain.
+
+The personal remote relay lives in `relay/`. It creates private, 24-hour rooms for your league and is protected by one long admin secret known only to the commissioner app and your Worker. In remote mode every phone—including phones in the room—uses the same HTTPS relay link for consistent timestamps. Sun God transports bids and public rosters only; league audio stays in Zoom, Meet, Discord, FaceTime, or another call.
+
+### Personal remote setup
+
+1. Create a long random secret, for example with `openssl rand -base64 32`.
+2. Store it in the Worker with `pnpm exec wrangler secret put RELAY_ADMIN_SECRET --config relay/wrangler.toml`.
+3. Deploy your Worker with `pnpm relay:deploy` and copy its `https://…workers.dev` URL.
+4. Copy `.env.example` to `.env`. Set `SUN_GOD_RELAY_URL` to that URL and `SUN_GOD_RELAY_ADMIN_SECRET` to the same secret, then restart Sun God. In the desktop app, the same two values can instead be saved during commissioner setup.
+5. Click **Enable remote bidders**. Share the new QR code or link with your league members.
+
+The admin secret is used only by the local host service to create rooms. It is never included in a phone link or sent to bidders. See [Personal remote bidding setup](docs/PERSONAL-REMOTE-SETUP.md) for troubleshooting and local Worker development.
+
 No API key is required for the core draft room. ElevenLabs and Cartesia can power the upgraded realtime auctioneer when configured; Auto mode prefers ElevenLabs, then Cartesia, then the browser voice. Participant bids are submitted only through their claimed phone controls.
 
-Lucy delivers dark, vulgar fantasy-football roasts after completed sales by default. Open **Lucy’s booth** to turn roasts off for the league. With `OPENAI_API_KEY`, the ten supplied house lines calibrate the first ten contextual roasts; every later sale still calls OpenAI but requires a genuinely new premise rather than cycling those examples. Lucy remembers the twenty most recent results to suppress repetition. The built-in rotation is used only when OpenAI is unavailable. Only displayed draft facts are sent to OpenAI—never phone identifiers or claim tokens. Death, drug, injury, and financial-ruin hyperbole is explicitly allowed, while invented real-player news and protected-trait jokes remain out of bounds. Set `OPENAI_ROAST_MODEL` to override the default low-latency `gpt-5.6-luna` writer.
+Adult fantasy-football roasts are on by default for this personal league and can be disabled in **Lucy’s booth**. One joke follows each completed sale. With `OPENAI_API_KEY`, OpenAI edits a candidate joke against the player, actual price, draft-sheet value, price outcome, and roster context. Contradictory premises are rejected locally. Only displayed draft facts are sent to OpenAI—never phone identifiers or claim tokens. Set `OPENAI_ROAST_MODEL` to override the default low-latency writer.
 
 ## Realtime AI auctioneer
 
@@ -58,7 +72,7 @@ Completed countdown calls are cached in a bounded in-memory audio cache, keyed b
 
 ## Phone bidding
 
-The laptop creates a private room code and a join link using its local network address. No participant app or account is required.
+The laptop creates a private room code and join link. Local mode uses the Mac’s network address; personal remote mode uses your HTTPS relay. No participant app or account is required.
 
 1. Finish the team order in **League setup**.
 2. Each participant scans the QR code in the **Phone bidding** panel.
@@ -68,7 +82,7 @@ The laptop creates a private room code and a join link using its local network a
 
 Bid requests are timestamped when the Sun God server receives them. Within the same 300 ms window, the highest submitted amount wins; if multiple managers submit that same highest amount, the auction pauses and displays those managers so the laptop operator can make a ruling without silently choosing based on network order.
 
-The QR code is generated locally. Phone requests stay between the participant devices and the Mac running Sun God. If a phone cannot open the join page, confirm both devices are on the same non-guest Wi-Fi network, disconnect any VPN, and allow incoming network connections if macOS asks.
+The QR code is generated locally. In local mode, phone requests stay between participant devices and the Mac; if a phone cannot open the page, confirm both devices are on the same non-guest Wi-Fi, disconnect any VPN, and allow incoming connections if macOS asks. Remote mode works over normal internet connections through your relay.
 
 ## Draft flow
 
@@ -102,17 +116,17 @@ Number keys 1–9 place quick bids. Space advances the countdown manually.
 
 ## Player CSV
 
-The **Load FantasyPros values** button on the player board replaces the current draft with the supplied 315-player FantasyPros auction list in a single click. It preserves the league's teams, budget, roster size, and bid increment while clearing sales and rosters for a fresh draft. Because the supplied list does not include NFL-team abbreviations, those players display `FA`; positions are included for draft filtering and display.
+The bundled player board contains fictional data for demonstrations and preflight testing only. It does not include or imply licensed rankings, projections, or auction values. Import a commissioner-provided CSV before a real draft.
 
 Importing a CSV opens a column-mapping preview before it resets the draft. Map player name and position, then optionally map NFL team and suggested auction value. Common headings such as `Player Name`, `Athlete`, `Pos`, `Pro Team`, and `Auction Value` are matched automatically, while quoted names and values containing commas are supported.
 
 ```csv
 name,position,team,value
-Puka Nacua,WR,LAR,42
-Bijan Robinson,RB,ATL,55
+Example Player,WR,FA,42
+Another Player,RB,FA,55
 ```
 
-The default player board is demo data. The built-in FantasyPros preset reflects the supplied snapshot and does not fetch or silently update values from the internet.
+The demo reload button restores only the fictional sample data.
 
 ## Results and exports
 
@@ -142,8 +156,8 @@ The results page can download a universal CSV or copy tab-separated tables arran
 - `src/phone-room-hub.mjs` owns room codes, exclusive team claims, server timestamps, live state, and participant events.
 - `src/vision-bidding.mjs` supplies the shared 300 ms simultaneous-bid classification used by the host.
 - `server.mjs` serves the host and phone pages, broadcasts local room events, directs patter, and relays ElevenLabs or Cartesia speech; permanent provider keys remain server-side.
-- Draft state is persisted in `localStorage`.
-- Phone-room traffic stays on the local network. Sun God does not capture or transcribe bidder audio.
+- Draft state is persisted locally on the commissioner’s Mac with browser fallback recovery.
+- Local phone-room traffic stays on the local network; remote phone-room traffic uses the commissioner’s personal relay. Sun God does not capture or transcribe bidder audio.
 - ElevenLabs and Cartesia are selectable production voice providers; the browser speech engine remains the automatic final fallback.
 
 ## Test

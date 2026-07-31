@@ -13,7 +13,7 @@ export class OpenAIPatterService {
     model = DEFAULT_MODEL,
     fetchImpl = globalThis.fetch,
     endpoint = "https://api.openai.com/v1/responses",
-    timeoutMs = 6_000,
+    timeoutMs = 10_000,
     onError = (message) => console.warn(`[OpenAI patter] ${message}`)
   } = {}) {
     this.apiKey = String(apiKey || "").trim();
@@ -74,7 +74,11 @@ export class OpenAIPatterService {
       this.lastError = null;
       return { lines, provider: "openai", model: this.model };
     } catch (error) {
-      this.#reportError(error?.name === "AbortError" ? "AI patter generation timed out." : error?.message || "AI patter generation failed.");
+      if (error?.name === "AbortError") {
+        this.lastError = `OpenAI missed the optional ${Math.max(1, Math.ceil(this.timeoutMs / 1_000))}-second patter window; built-in patter stayed active.`;
+      } else {
+        this.#reportError(error?.message || "AI patter generation failed.");
+      }
       return { lines: [], provider: "local", model: null };
     } finally {
       clearTimeout(timeout);

@@ -1,10 +1,63 @@
 {
   "name": "sun-god-auction-systems",
+  "description": "Local-first fantasy auctioneer with hybrid remote phone bidding.",
+  "author": "Sun God Auction Systems",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "desktop": "electron .",
+    "test": "node --test",
+    "predist:mac": "node scripts/write-release-config.mjs",
+    "dist:mac": "electron-builder --mac dmg --arm64",
+    "relay:dev": "wrangler dev --config relay/wrangler.toml",
+    "relay:deploy": "wrangler deploy --config relay/wrangler.toml"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "^26.15.3",
+    "wrangler": "^4.113.0"
+  },
+  "build": {
+    "appId": "com.sungodauctioneer.personal",
+    "productName": "Sun God Auctioneer",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "vendor/qrcodegen.js",
+      "assets/**/*",
+      "docs/**/*",
+      "*.html",
+      "server.mjs",
+      "package.json",
+      "!test/**/*",
+      "!relay/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.sports",
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false
+    },
+    "artifactName": "Sun-God-Auctioneer-${version}-${arch}.${ext}"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

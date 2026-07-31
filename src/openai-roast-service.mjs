@@ -2,8 +2,10 @@ import {
   buildRoastInput,
   buildRoastInstructions,
   curatedRoast,
-  extractResponseText,
   normalizeRoastContext,
+  parseRoastResponse,
+  roastMatchesContext,
+  ROAST_RESPONSE_FORMAT,
   ROAST_REFERENCE_LINES
 } from "./roast-engine.mjs";
 
@@ -49,8 +51,9 @@ export class OpenAIRoastService {
     const referenceIndex = roastIndex < ROAST_REFERENCE_LINES.length ? roastIndex : null;
     const fallbackIndex = roastIndex % ROAST_REFERENCE_LINES.length;
     this.referenceCursor += 1;
+    const candidateJoke = curatedRoast(normalized, fallbackIndex);
     const fallback = () => ({
-      text: curatedRoast(normalized, fallbackIndex),
+      text: candidateJoke,
       provider: "curated",
       model: null,
       referenceIndex: fallbackIndex
@@ -69,11 +72,11 @@ export class OpenAIRoastService {
         body: JSON.stringify({
           model: this.model,
           instructions: buildRoastInstructions({ personality, referenceIndex }),
-          input: buildRoastInput(normalized, recentRoasts),
+          input: buildRoastInput(normalized, recentRoasts, candidateJoke),
           max_output_tokens: 160,
           reasoning: { effort: "none" },
           store: false,
-          text: { verbosity: "low" }
+          text: { verbosity: "low", format: ROAST_RESPONSE_FORMAT }
         }),
         signal: controller.signal
       });
@@ -82,13 +85,18 @@ export class OpenAIRoastService {
         this.#reportError(payload?.error?.message || `OpenAI returned HTTP ${response.status}.`);
         return fallback();
       }
-      const text = extractResponseText(payload);
-      if (!text) {
-        this.#reportError("OpenAI returned no spoken text.");
+      const edited = parseRoastResponse(payload);
+      if (
+        !edited?.text
+        || !edited.premiseSupported
+        || edited.priceAngle !== normalized.priceOutcome
+        || !roastMatchesContext(edited.text, normalized)
+      ) {
+        this.#reportError("OpenAI returned a roast that did not match the sale context.");
         return fallback();
       }
       this.lastError = null;
-      return { text, provider: "openai", model: this.model, referenceIndex };
+      return { text: edited.text, provider: "openai", model: this.model, referenceIndex };
     } catch (error) {
       this.#reportError(error?.name === "AbortError" ? "OpenAI roast writing timed out." : error?.message || "OpenAI roast writing failed.");
       return fallback();

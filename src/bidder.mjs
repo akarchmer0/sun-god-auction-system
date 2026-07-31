@@ -1,4 +1,5 @@
 import { easyBidAmounts } from "./phone-bidding.mjs";
+import { LanRoomTransport } from "./room-transports.mjs";
 
 const app = document.querySelector("#bidder-app");
 const params = new URL(window.location.href).searchParams;
@@ -10,7 +11,7 @@ let room = null;
 let status = "loading";
 let message = "Connecting to the draft room…";
 let sendingBid = false;
-let eventSource = null;
+let roomTransport = roomId ? new LanRoomTransport({ roomId }) : null;
 let activePhoneTab = "auction";
 
 localStorage.setItem(TOKEN_KEY, participantToken);
@@ -26,6 +27,8 @@ function wireEvents() {
       const nextCode = String(new FormData(event.target).get("room") || "").trim().toUpperCase();
       if (!/^[A-Z2-9]{6}$/.test(nextCode)) return showMessage("Enter the six-character room code.", "error");
       roomId = nextCode;
+      roomTransport?.close();
+      roomTransport = new LanRoomTransport({ roomId });
       selectedTeamId = localStorage.getItem(teamStorageKey(roomId));
       window.history.replaceState({}, "", `${window.location.pathname}?room=${encodeURIComponent(roomId)}`);
       void loadRoom();
@@ -52,7 +55,8 @@ function wireEvents() {
         selectedTeamId = null;
         roomId = "";
         room = null;
-        eventSource?.close();
+        roomTransport?.close();
+        roomTransport = null;
         status = "code";
         window.history.replaceState({}, "", window.location.pathname);
         render();
@@ -68,9 +72,10 @@ async function loadRoom() {
   message = "Connecting to the draft room…";
   render();
   try {
-    room = await requestJson(`/api/phone-room?room=${encodeURIComponent(roomId)}`);
+    roomTransport ||= new LanRoomTransport({ roomId });
+    room = await roomTransport.snapshot();
     if (selectedTeamId) {
-      try { room = await postJson("/api/phone-room/claim", { roomId, teamId: selectedTeamId, participantToken }); }
+      try { room = await roomTransport.claimTeam({ roomId, teamId: selectedTeamId, participantToken }); }
       catch { selectedTeamId = null; localStorage.removeItem(teamStorageKey(roomId)); }
     }
     status = selectedTeamId ? "joined" : "choose";
@@ -85,7 +90,7 @@ async function loadRoom() {
 }
 
 async function claimTeam(teamId) {
-  room = await postJson("/api/phone-room/claim", { roomId, teamId, participantToken });
+  room = await roomTransport.claimTeam({ roomId, teamId, participantToken });
   selectedTeamId = teamId;
   localStorage.setItem(teamStorageKey(roomId), teamId);
   status = "joined";
@@ -96,7 +101,7 @@ async function claimTeam(teamId) {
 }
 
 async function releaseTeam() {
-  await postJson("/api/phone-room/release", { roomId, participantToken });
+  await roomTransport.releaseTeam({ roomId, participantToken });
   selectedTeamId = null;
   localStorage.removeItem(teamStorageKey(roomId));
   status = "choose";
@@ -115,7 +120,7 @@ async function placePhoneBid(requestedAmount = null) {
   sendingBid = true;
   render();
   try {
-    await postJson("/api/phone-room/bid", { roomId, teamId: selectedTeamId, participantToken, amount });
+    await roomTransport.submitBid({ roomId, teamId: selectedTeamId, participantToken, amount });
     message = `Bid $${amount} sent`;
     if (navigator.vibrate) navigator.vibrate([45, 35, 45]);
   } catch (error) {
@@ -127,11 +132,8 @@ async function placePhoneBid(requestedAmount = null) {
 }
 
 function connectToRoomEvents() {
-  eventSource?.close();
-  eventSource = new EventSource(`/api/phone-room/events?room=${encodeURIComponent(roomId)}`);
-  for (const eventName of ["snapshot", "room", "state"]) {
-    eventSource.addEventListener(eventName, (event) => {
-      const payload = JSON.parse(event.data);
+  roomTransport.connect((payload) => {
+    if (["snapshot", "room", "state"].includes(payload.type)) {
       room = payload.room;
       if (selectedTeamId && !room.teams.some((team) => team.id === selectedTeamId && team.claimed)) {
         localStorage.removeItem(teamStorageKey(roomId));
@@ -141,14 +143,15 @@ function connectToRoomEvents() {
       status = selectedTeamId ? "joined" : "choose";
       if (selectedTeamId) message = "Connected";
       render();
-    });
-  }
-  eventSource.onopen = () => { message = "Connected"; render(); };
-  eventSource.onerror = () => { message = "Reconnecting…"; render(); };
+    }
+  }, ({ state }) => {
+    message = state === "connected" ? "Connected" : "Reconnecting…";
+    render();
+  });
 }
 
 async function refreshRoom() {
-  room = await requestJson(`/api/phone-room?room=${encodeURIComponent(roomId)}`);
+  room = await roomTransport.snapshot();
   render();
 }
 
@@ -245,17 +248,6 @@ function renderBidder() {
     <nav class="phone-tabs" aria-label="Bidder views"><button class="${activePhoneTab === "auction" ? "is-active" : ""}" data-action="show-tab" data-tab="auction">Auction</button><button class="${activePhoneTab === "roster" ? "is-active" : ""}" data-action="show-tab" data-tab="roster">Roster <b>${roster.length}</b></button></nav>
     ${activePhoneTab === "roster" ? rosterTab : auctionTab}
   </section>`);
-}
-
-async function requestJson(url, options) {
-  const response = await fetch(url, options);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "The draft room is unavailable.");
-  return payload;
-}
-
-function postJson(url, body) {
-  return requestJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 function showMessage(nextMessage, kind = "") {

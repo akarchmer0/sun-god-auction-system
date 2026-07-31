@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { auctioneerSpeedOffset } from "./auctioneer-speed.mjs";
 
 const DEFAULT_MODEL = "eleven_flash_v2_5";
 const DEFAULT_SAMPLE_RATE = 24_000;
@@ -69,7 +70,7 @@ export class ElevenLabsSpeechService {
     return true;
   }
 
-  async createSpeech({ transcript, style = "neutral", personality = "classic", energy = 2, onEvent }) {
+  async createSpeech({ transcript, style = "neutral", personality = "classic", energy = 2, speed = "normal", onEvent }) {
     const text = String(transcript || "").trim().slice(0, 1_500);
     if (!text) throw serviceError("Auctioneer speech text is required.", 400);
     if (!this.status().available) throw serviceError(this.status().message, 503);
@@ -99,7 +100,7 @@ export class ElevenLabsSpeechService {
     this.contexts.set(contextId, context);
 
     try {
-      const generation = buildElevenLabsGeneration({ contextId, transcript: text, style, personality, energy });
+      const generation = buildElevenLabsGeneration({ contextId, transcript: text, style, personality, energy, speed });
       socket.send(JSON.stringify({ ...generation, text: " " }));
       socket.send(JSON.stringify({ context_id: contextId, text: generation.text, flush: true }));
       closeContext();
@@ -224,22 +225,22 @@ export class ElevenLabsSpeechService {
   }
 }
 
-export function elevenLabsVoiceSettings(style, { personality = "classic", energy = 2 } = {}) {
+export function elevenLabsVoiceSettings(style, { personality = "classic", energy = 2, speed = "normal" } = {}) {
   const base = STYLE_SETTINGS[style] || STYLE_SETTINGS.neutral;
   const level = Math.min(3, Math.max(1, Number(energy) || 2));
   const personalitySpeed = personality === "hype" ? 0.05 : personality === "pro" ? 0.02 : 0;
   return {
     stability: Number(Math.max(0.2, Math.min(0.75, base.stability - (level - 2) * 0.05)).toFixed(2)),
     similarity_boost: base.similarity_boost,
-    speed: Number(Math.max(0.7, Math.min(1.2, base.speed + personalitySpeed + (level - 2) * 0.06)).toFixed(2))
+    speed: Number(Math.max(0.7, Math.min(1.2, base.speed + personalitySpeed + (level - 2) * 0.06 + auctioneerSpeedOffset(speed))).toFixed(2))
   };
 }
 
-export function buildElevenLabsGeneration({ contextId, transcript, style, personality = "classic", energy = 2 }) {
+export function buildElevenLabsGeneration({ contextId, transcript, style, personality = "classic", energy = 2, speed = "normal" }) {
   return {
     context_id: contextId,
     text: `${String(transcript || "").trim()} `,
-    voice_settings: elevenLabsVoiceSettings(style, { personality, energy })
+    voice_settings: elevenLabsVoiceSettings(style, { personality, energy, speed })
   };
 }
 

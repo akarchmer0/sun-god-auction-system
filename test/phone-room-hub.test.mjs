@@ -127,3 +127,25 @@ test("room subscribers receive claim, state, and bid events", () => {
   unsubscribe();
   assert.deepEqual(events, ["snapshot", "room", "state", "bid"]);
 });
+
+test("rooms expire and enforce connection limits", () => {
+  let now = 100;
+  const hub = new PhoneRoomHub({ now: () => now, roomTtlMs: 1_000, maxListeners: 1 });
+  hub.upsertRoom({ roomId: "TTL222", hostKey, teams });
+  const unsubscribe = hub.subscribe("TTL222", () => {});
+  assert.throws(() => hub.subscribe("TTL222", () => {}), /connection limit/);
+  unsubscribe();
+  now = 1_100;
+  assert.throws(() => hub.snapshot("TTL222"), /expired/);
+});
+
+test("room state rejects executable or unsupported player fields", () => {
+  const hub = new PhoneRoomHub({ now: () => 100 });
+  hub.upsertRoom({ roomId: "VAL222", hostKey, teams });
+  assert.throws(() => hub.updateAuction({
+    roomId: "VAL222",
+    hostKey,
+    auction: { phase: "open", player: { id: "player", name: "Safe", position: "<IMG>", nflTeam: "FA" } },
+    teams: []
+  }), /position is invalid/);
+});

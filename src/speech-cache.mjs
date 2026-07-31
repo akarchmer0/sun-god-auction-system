@@ -34,11 +34,11 @@ export class SpeechAudioCache {
   }
 }
 
-export function countdownCacheKey({ text, style, personality = "classic", energy = 2, voiceId = "", model = "" }) {
+export function countdownCacheKey({ text, style, personality = "classic", energy = 2, speed = "normal", voiceId = "", model = "" }) {
   if (style !== "countdown") return null;
   const transcript = String(text || "").trim();
   if (!transcript || transcript.length > 180) return null;
-  return JSON.stringify([model, voiceId, personality, Number(energy) || 2, transcript]);
+  return JSON.stringify([model, voiceId, personality, Number(energy) || 2, speed, transcript]);
 }
 
 function base64Bytes(value) {

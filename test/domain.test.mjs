@@ -9,8 +9,11 @@ import {
   maxBidForTeam,
   moveToNextPlayer,
   undoLastSale,
+  correctSale,
   currentNominator,
-  canTeamRosterPlayer
+  canTeamRosterPlayer,
+  countdownDelayMs,
+  DEFAULT_COUNTDOWN_SECONDS
 } from "../src/domain.mjs";
 
 const players = [
@@ -27,6 +30,22 @@ function liveDraft() {
   draft = nominatePlayer(draft, "puka");
   return openAuction(draft);
 }
+
+test("draft countdown windows are normalized and converted to timer delays", () => {
+  const draft = createDraft({
+    players,
+    teams,
+    countdownOnceSeconds: 7.3,
+    countdownTwiceSeconds: 3.6
+  });
+  assert.equal(countdownDelayMs(draft.config, "open"), 8_000);
+  assert.equal(countdownDelayMs(draft.config, "once"), 7_300);
+  assert.equal(countdownDelayMs(draft.config, "twice"), 3_600);
+
+  const defaults = createDraft({ players, teams });
+  assert.equal(defaults.config.countdownOnceSeconds, DEFAULT_COUNTDOWN_SECONDS.once);
+  assert.equal(defaults.config.countdownTwiceSeconds, DEFAULT_COUNTDOWN_SECONDS.twice);
+});
 
 test("a bid resets the countdown and enforces the increment", () => {
   let draft = placeBid(liveDraft(), "a", 5);
@@ -119,4 +138,21 @@ test("nomination order advances after a result and rewinds with undo", () => {
   draft = undoLastSale(draft);
   assert.equal(currentNominator(draft).id, "b");
   assert.equal(draft.auction.nominatorTeamId, "b");
+});
+
+test("historical sale correction deterministically rebuilds buyers, budgets, and the player pool", () => {
+  let draft = placeBid(liveDraft(), "a", 5);
+  draft = advanceCountdown(advanceCountdown(advanceCountdown(draft)));
+  const saleId = draft.sales[0].id;
+  const corrected = correctSale(draft, saleId, { teamId: "b", amount: 7 });
+  assert.equal(corrected.teams.find((team) => team.id === "a").budget, 20);
+  assert.equal(corrected.teams.find((team) => team.id === "b").budget, 13);
+  assert.deepEqual(corrected.teams.find((team) => team.id === "b").roster, [{ playerId: "puka", price: 7 }]);
+  assert.equal(corrected.auction.phase, "paused");
+
+  const returned = correctSale(corrected, saleId, { returnToPool: true });
+  assert.equal(returned.sales.length, 0);
+  assert.equal(returned.players.find((player) => player.id === "puka").status, "available");
+  assert.equal(returned.queue[0], "puka");
+  assert.equal(returned.teams.every((team) => team.budget === 20 && team.roster.length === 0), true);
 });

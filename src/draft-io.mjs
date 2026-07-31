@@ -4,9 +4,14 @@ const COLUMN_ALIASES = {
   team: ["team", "nfl team", "pro team", "club"],
   value: ["value", "auction value", "suggested value", "price", "projected value", "avg value"]
 };
+const PLAYER_POSITIONS = new Set(["QB", "RB", "WR", "TE", "FLEX", "K", "DST"]);
+const MAX_CSV_BYTES = 1_000_000;
+const MAX_RESULTS_ENCODED_CHARS = 1_500_000;
+const MAX_RESULTS_JSON_BYTES = 2_000_000;
 
 export function parseCsv(text) {
   const input = String(text || "").replace(/^\uFEFF/, "");
+  if (new TextEncoder().encode(input).length > MAX_CSV_BYTES) throw new Error("The CSV file is larger than 1 MB.");
   const parsed = [];
   let row = [];
   let cell = "";
@@ -51,16 +56,20 @@ export function playersFromMappedCsv(rows, mapping) {
   if (nameIndex < 0 || positionIndex < 0) throw new Error("Map both Player name and Position before importing.");
   const teamIndex = validIndex(mapping?.team);
   const valueIndex = validIndex(mapping?.value);
+  if (rows.length > 5_000) throw new Error("The CSV contains more than 5,000 players.");
   const players = rows.map((row, index) => {
-    const name = String(row[nameIndex] || "").trim();
+    const name = validText(row[nameIndex], 140, "Player name");
     if (!name) return null;
     const position = String(row[positionIndex] || "FLEX").trim().toUpperCase() || "FLEX";
+    if (!PLAYER_POSITIONS.has(position)) throw new Error(`Row ${index + 2} has an unsupported position: ${position}.`);
+    const nflTeam = teamIndex >= 0 ? String(row[teamIndex] || "FA").trim().toUpperCase() || "FA" : "FA";
+    if (!/^(?:[A-Z]{2,4}|FA)$/.test(nflTeam)) throw new Error(`Row ${index + 2} has an invalid NFL team abbreviation.`);
     return {
       id: `import-${slug(name)}-${index}`,
       name,
       position,
-      nflTeam: teamIndex >= 0 ? String(row[teamIndex] || "FA").trim().toUpperCase() || "FA" : "FA",
-      suggestedValue: valueIndex >= 0 ? Math.max(0, moneyNumber(row[valueIndex])) : 1,
+      nflTeam,
+      suggestedValue: valueIndex >= 0 ? Math.min(100_000, Math.max(0, moneyNumber(row[valueIndex]))) : 1,
       status: "available"
     };
   }).filter(Boolean);
@@ -168,19 +177,87 @@ export async function encodeResultsPayload(payload) {
 }
 
 export async function decodeResultsPayload(encoded) {
+  if (String(encoded || "").length > MAX_RESULTS_ENCODED_CHARS) throw new Error("This results link is too large.");
   const [kind, body] = String(encoded || "").split(".", 2);
   if (!body || !["g", "j"].includes(kind)) throw new Error("This results link is not valid.");
   let bytes = base64UrlToBytes(body);
   if (kind === "g") {
     if (!globalThis.DecompressionStream) throw new Error("This browser cannot open compressed results links.");
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    bytes = await readStreamWithLimit(stream, MAX_RESULTS_JSON_BYTES);
   }
-  const payload = JSON.parse(new TextDecoder().decode(bytes));
+  if (bytes.byteLength > MAX_RESULTS_JSON_BYTES) throw new Error("This results link expands beyond the safe size limit.");
+  const payload = normalizeResultsPayload(JSON.parse(new TextDecoder().decode(bytes)));
   if (payload?.version !== 1 || !Array.isArray(payload.teams) || !Array.isArray(payload.sales)) {
     throw new Error("This results link contains an unsupported draft format.");
   }
   return payload;
+}
+
+async function readStreamWithLimit(stream, maximum) {
+  const reader = stream.getReader();
+  const chunks = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > maximum) {
+      await reader.cancel();
+      throw new Error("This results link expands beyond the safe size limit.");
+    }
+    chunks.push(value);
+  }
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; }
+  return output;
+}
+
+function normalizeResultsPayload(payload) {
+  if (payload?.version !== 1 || !Array.isArray(payload.teams) || !Array.isArray(payload.sales)) return payload;
+  if (payload.teams.length > 16 || payload.sales.length > 5_000) throw new Error("This results link exceeds the supported draft size.");
+  const cleanMoney = (value) => Math.min(100_000, Math.max(0, Number.isFinite(Number(value)) ? Math.round(Number(value)) : 0));
+  const clean = (value, max = 140) => validText(value, max, "Results text");
+  return {
+    version: 1,
+    generatedAt: Number.isFinite(Number(payload.generatedAt)) ? Number(payload.generatedAt) : Date.now(),
+    config: {
+      budget: cleanMoney(payload.config?.budget),
+      rosterSize: cleanMoney(payload.config?.rosterSize),
+      increment: cleanMoney(payload.config?.increment),
+      rosterRequirements: Object.fromEntries(Object.entries(payload.config?.rosterRequirements || {}).filter(([key]) => PLAYER_POSITIONS.has(key)).map(([key, value]) => [key, cleanMoney(value)]))
+    },
+    teams: payload.teams.map((team) => ({
+      id: clean(team?.id, 80), name: clean(team?.name, 100), manager: clean(team?.manager, 100),
+      color: /^#[0-9a-f]{6}$/i.test(team?.color) ? team.color : "#d39a20",
+      budgetStart: cleanMoney(team?.budgetStart), budgetRemaining: cleanMoney(team?.budgetRemaining), spent: cleanMoney(team?.spent),
+      roster: Array.isArray(team?.roster) ? team.roster.slice(0, 40).map((player) => cleanResultPlayer(player, cleanMoney, clean)) : []
+    })),
+    sales: payload.sales.map((sale) => ({
+      playerId: clean(sale?.playerId, 100), playerName: clean(sale?.playerName),
+      position: PLAYER_POSITIONS.has(sale?.position) ? sale.position : "FLEX",
+      nflTeam: /^(?:[A-Z]{2,4}|FA)$/.test(sale?.nflTeam) ? sale.nflTeam : "FA",
+      suggestedValue: cleanMoney(sale?.suggestedValue), teamId: clean(sale?.teamId, 80),
+      fantasyTeam: clean(sale?.fantasyTeam, 100), manager: clean(sale?.manager, 100), price: cleanMoney(sale?.price),
+      at: Number.isFinite(Number(sale?.at)) ? Number(sale.at) : null
+    }))
+  };
+}
+
+function cleanResultPlayer(player, cleanMoney, clean) {
+  return {
+    playerId: clean(player?.playerId, 100), name: clean(player?.name),
+    position: PLAYER_POSITIONS.has(player?.position) ? player.position : "FLEX",
+    nflTeam: /^(?:[A-Z]{2,4}|FA)$/.test(player?.nflTeam) ? player.nflTeam : "FA",
+    suggestedValue: cleanMoney(player?.suggestedValue), price: cleanMoney(player?.price)
+  };
+}
+
+function validText(value, maximum, label) {
+  const text = String(value || "").trim();
+  if (text.length > maximum || /[\u0000-\u001f\u007f]/.test(text)) throw new Error(`${label} contains unsupported characters or is too long.`);
+  return text;
 }
 
 function csvCell(value) {

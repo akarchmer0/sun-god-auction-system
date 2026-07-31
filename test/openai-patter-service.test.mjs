@@ -50,10 +50,11 @@ test("invalid model output falls back without blocking the auction", async () =>
 });
 
 test("Patter Director can wait in the background without delaying local speech", async () => {
+  const errors = [];
   const service = new OpenAIPatterService({
     apiKey: "test-key",
     timeoutMs: 25,
-    onError: () => {},
+    onError: (message) => errors.push(message),
     fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => {
       signal.addEventListener("abort", () => {
         const error = new Error("aborted");
@@ -67,4 +68,6 @@ test("Patter Director can wait in the background without delaying local speech",
   assert.ok(Date.now() - startedAt >= 20);
   assert.deepEqual(result.lines, []);
   assert.equal(result.provider, "local");
+  assert.deepEqual(errors, []);
+  assert.match(service.status().message, /built-in patter stayed active/i);
 });
