@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyPhoneBidBatch, easyBidAmounts } from "../src/phone-bidding.mjs";
+import { buildPhoneAuctionHistory, classifyPhoneBidBatch, easyBidAmounts } from "../src/phone-bidding.mjs";
 
 test("easy bids interpolate two round amounts toward suggested value", () => {
   assert.deepEqual(easyBidAmounts({ currentBid: 1, nextBid: 2, suggestedValue: 42, maxBid: 100 }), [15, 30]);
@@ -24,4 +24,15 @@ test("simultaneous custom bids use the highest amount and tie only at that amoun
     { teamId: "b", amount: 35 },
     { teamId: "c", amount: 30 }
   ]), { kind: "tie", teamIds: ["a", "b"], amount: 35 });
+});
+
+test("phone auction history resolves completed sales to public player and winner details", () => {
+  assert.deepEqual(buildPhoneAuctionHistory({
+    sales: [{ id: "sale-1", playerId: "puka", teamId: "moon", amount: 42 }],
+    players: [{ id: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR" }],
+    teams: [{ id: "moon", name: "Moon Club", manager: "Jordan", color: "#396b49" }]
+  }), [{
+    id: "sale-1", lotNumber: 1, playerName: "Puka Nacua", position: "WR", nflTeam: "LAR",
+    amount: 42, teamName: "Moon Club", manager: "Jordan", teamColor: "#396b49"
+  }]);
 });

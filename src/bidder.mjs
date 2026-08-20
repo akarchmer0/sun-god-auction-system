@@ -13,6 +13,8 @@ let message = "Connecting to the draft room…";
 let sendingBid = false;
 let roomTransport = roomId ? new LanRoomTransport({ roomId }) : null;
 let activePhoneTab = "auction";
+let viewedRosterTeamId = selectedTeamId;
+let rosterPickerOpen = false;
 
 localStorage.setItem(TOKEN_KEY, participantToken);
 render();
@@ -30,6 +32,8 @@ function wireEvents() {
       roomTransport?.close();
       roomTransport = new LanRoomTransport({ roomId });
       selectedTeamId = localStorage.getItem(teamStorageKey(roomId));
+      viewedRosterTeamId = selectedTeamId;
+      rosterPickerOpen = false;
       window.history.replaceState({}, "", `${window.location.pathname}?room=${encodeURIComponent(roomId)}`);
       void loadRoom();
       return;
@@ -48,11 +52,27 @@ function wireEvents() {
     try {
       if (button.dataset.action === "claim") return await claimTeam(button.dataset.teamId);
       if (button.dataset.action === "bid") return await placePhoneBid(button.dataset.amount == null ? null : Number(button.dataset.amount));
-      if (button.dataset.action === "show-tab") { activePhoneTab = button.dataset.tab === "roster" ? "roster" : "auction"; render(); return; }
+      if (button.dataset.action === "show-tab") {
+        activePhoneTab = button.dataset.tab === "roster" ? "roster" : "auction";
+        if (activePhoneTab === "roster" && !viewedRosterTeamId) viewedRosterTeamId = selectedTeamId;
+        if (activePhoneTab !== "roster") rosterPickerOpen = false;
+        render();
+        return;
+      }
+      if (button.dataset.action === "toggle-roster-picker") { rosterPickerOpen = !rosterPickerOpen; render(); return; }
+      if (button.dataset.action === "view-roster") {
+        if (room?.teams?.some((item) => item.id === button.dataset.teamId)) viewedRosterTeamId = button.dataset.teamId;
+        rosterPickerOpen = false;
+        activePhoneTab = "roster";
+        render();
+        return;
+      }
       if (button.dataset.action === "switch-team") return await releaseTeam();
       if (button.dataset.action === "retry") return await loadRoom();
       if (button.dataset.action === "change-code") {
         selectedTeamId = null;
+        viewedRosterTeamId = null;
+        rosterPickerOpen = false;
         roomId = "";
         room = null;
         roomTransport?.close();
@@ -76,7 +96,7 @@ async function loadRoom() {
     room = await roomTransport.snapshot();
     if (selectedTeamId) {
       try { room = await roomTransport.claimTeam({ roomId, teamId: selectedTeamId, participantToken }); }
-      catch { selectedTeamId = null; localStorage.removeItem(teamStorageKey(roomId)); }
+      catch { selectedTeamId = null; viewedRosterTeamId = null; localStorage.removeItem(teamStorageKey(roomId)); }
     }
     status = selectedTeamId ? "joined" : "choose";
     message = selectedTeamId ? "Connected" : "Choose your team";
@@ -92,6 +112,8 @@ async function loadRoom() {
 async function claimTeam(teamId) {
   room = await roomTransport.claimTeam({ roomId, teamId, participantToken });
   selectedTeamId = teamId;
+  viewedRosterTeamId = teamId;
+  rosterPickerOpen = false;
   localStorage.setItem(teamStorageKey(roomId), teamId);
   status = "joined";
   message = "Connected";
@@ -103,6 +125,8 @@ async function claimTeam(teamId) {
 async function releaseTeam() {
   await roomTransport.releaseTeam({ roomId, participantToken });
   selectedTeamId = null;
+  viewedRosterTeamId = null;
+  rosterPickerOpen = false;
   localStorage.removeItem(teamStorageKey(roomId));
   status = "choose";
   message = "Choose your team";
@@ -138,6 +162,8 @@ function connectToRoomEvents() {
       if (selectedTeamId && !room.teams.some((team) => team.id === selectedTeamId && team.claimed)) {
         localStorage.removeItem(teamStorageKey(roomId));
         selectedTeamId = null;
+        viewedRosterTeamId = null;
+        rosterPickerOpen = false;
         message = "The host reset the connected phones. Choose your team again.";
       }
       status = selectedTeamId ? "joined" : "choose";
@@ -197,10 +223,12 @@ function renderTeamChoice() {
 
 function renderBidder() {
   const team = room.teams.find((item) => item.id === selectedTeamId);
-  if (!team) { selectedTeamId = null; return renderTeamChoice(); }
+  if (!team) { selectedTeamId = null; viewedRosterTeamId = null; rosterPickerOpen = false; return renderTeamChoice(); }
   const auction = room.auction || {};
   const player = auction.player;
+  const highBidder = room.teams.find((item) => item.id === auction.highBidderId);
   const hasHighBid = auction.highBidderId === team.id;
+  const hasAnyBid = Boolean(highBidder);
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
   const hasRosterFit = team.eligibleForPlayer !== false;
   const canBid = auction.acceptingBids && !hasHighBid && canAfford && hasRosterFit && !sendingBid;
@@ -221,11 +249,13 @@ function renderBidder() {
           : !hasRosterFit
             ? "POSITION SLOTS RESERVED"
           : `BID $${auction.nextBid}`;
-  const roster = Array.isArray(team.roster) ? team.roster : [];
+  const rosterTeam = room.teams.find((item) => item.id === viewedRosterTeamId) || team;
+  viewedRosterTeamId = rosterTeam.id;
+  const roster = Array.isArray(rosterTeam.roster) ? rosterTeam.roster : [];
   const auctionTab = `<div class="phone-lot ${player ? "" : "is-empty"}">
       <span class="kicker">${player ? `${escapeHtml(player.position)} · ${escapeHtml(player.nflTeam)}` : "AUCTION ROOM"}</span>
       <h1>${player ? escapeHtml(player.name) : "Waiting for a player"}</h1>
-      <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : "CURRENT BID"}</small><strong><sup>$</sup>${Number(auction.amount || 0)}</strong></div>
+      <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : hasAnyBid ? "CURRENT BID" : "OPENING BID"}</small><strong><sup>$</sup>${Number(auction.amount || 1)}</strong>${highBidder ? `<div class="phone-bid-holder" style="--bid-holder:${highBidder.color}"><i></i><span><small>HELD BY</small><b>${escapeHtml(highBidder.name)}</b></span><em>${escapeHtml(highBidder.manager)}</em></div>` : ""}</div>
       <span class="phone-phase">${escapeHtml(phaseLabel(auction.phase))}</span>
     </div>
     <button class="bid-button ${hasHighBid ? "is-winning" : ""}" data-action="bid" ${canBid ? "" : "disabled"}>${buttonLabel}<small>${canBid ? "Tap once — every bid is confirmed by the host" : escapeHtml(message)}</small></button>
@@ -238,10 +268,14 @@ function renderBidder() {
       </form>
     </section>
     <div class="phone-budget"><span><small>BUDGET</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>ROSTER</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>`;
-  const rosterTab = `<div class="phone-roster-view">
-      <div class="phone-roster-title"><span class="kicker">TEAM BUILDER</span><h1>Your roster</h1><p>${roster.length ? `${roster.length} player${roster.length === 1 ? "" : "s"} drafted` : "Players appear here immediately after they are sold to you."}</p></div>
-      <div class="phone-budget"><span><small>REMAINING</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>PLAYERS</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>
-      <div class="phone-roster-list">${roster.length ? roster.map((rosterPlayer, index) => `<div class="phone-roster-row"><span class="roster-index">${String(index + 1).padStart(2, "0")}</span><span class="roster-position">${escapeHtml(rosterPlayer.position)}</span><span class="roster-player"><strong>${escapeHtml(rosterPlayer.name)}</strong><small>${escapeHtml(rosterPlayer.nflTeam)}</small></span><b>$${Number(rosterPlayer.price || 0)}</b></div>`).join("") : `<div class="phone-roster-empty"><strong>No players yet</strong><span>Your purchases will sync from the auction laptop.</span></div>`}</div>
+  const rosterTab = `<div class="phone-roster-view" style="--roster-team:${rosterTeam.color}">
+      <div class="phone-roster-title">
+        <button class="phone-roster-picker" data-action="toggle-roster-picker" aria-expanded="${rosterPickerOpen}" aria-haspopup="listbox"><i></i><span><small>VIEWING ROSTER</small><strong>${escapeHtml(rosterTeam.name)}</strong><b>${escapeHtml(rosterTeam.manager)}</b></span><em>${rosterPickerOpen ? "CLOSE" : "CHANGE"}<u aria-hidden="true">⌄</u></em></button>
+        ${rosterPickerOpen ? `<div class="phone-roster-menu" role="listbox" aria-label="Choose a team roster">${room.teams.map((rosterOption) => `<button data-action="view-roster" data-team-id="${escapeHtml(rosterOption.id)}" role="option" aria-selected="${rosterOption.id === rosterTeam.id}" class="${rosterOption.id === rosterTeam.id ? "is-selected" : ""}"><i style="background:${rosterOption.color}"></i><span><strong>${escapeHtml(rosterOption.name)}</strong><small>${escapeHtml(rosterOption.manager)}</small></span><b>${Number(rosterOption.rosterCount || 0)}/${Number(rosterOption.rosterSize || 0)}</b></button>`).join("")}</div>` : ""}
+        <p>${roster.length ? `${roster.length} player${roster.length === 1 ? "" : "s"} drafted` : "No players drafted yet"} · Tap the header to switch teams.</p>
+      </div>
+      <div class="phone-budget"><span><small>REMAINING</small><strong>$${Number(rosterTeam.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(rosterTeam.maxBid || 0)}</strong></span><span><small>PLAYERS</small><strong>${Number(rosterTeam.rosterCount || 0)}/${Number(rosterTeam.rosterSize || 0)}</strong></span></div>
+      <div class="phone-roster-list">${roster.length ? roster.map((rosterPlayer, index) => `<div class="phone-roster-row"><span class="roster-index">${String(index + 1).padStart(2, "0")}</span><span class="roster-position">${escapeHtml(rosterPlayer.position)}</span><span class="roster-player"><strong>${escapeHtml(rosterPlayer.name)}</strong><small>${escapeHtml(rosterPlayer.nflTeam)}</small></span><b>$${Number(rosterPlayer.price || 0)}</b></div>`).join("") : `<div class="phone-roster-empty"><strong>No players yet</strong><span>${escapeHtml(rosterTeam.name)}’s purchases will appear here as players are sold.</span></div>`}</div>
     </div>`;
   renderShell(`<section class="bidder-room" style="--team:${team.color}">
     <div class="phone-team-header"><span><small>YOUR TEAM</small><strong>${escapeHtml(team.manager)}</strong><b>${escapeHtml(team.name)}</b></span><button data-action="switch-team">Switch</button></div>

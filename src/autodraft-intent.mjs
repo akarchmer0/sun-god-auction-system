@@ -37,10 +37,14 @@ Outcome:
 - Use target when the team should pay a premium to pursue the player.
 - Use value when the player is worth approximately the supplied suggested value to the team.
 - Use discount when the team is interested only below the supplied suggested value.
-- Use pass when the team should stay silent for the entire lot.
+- Use pass when a non-nominating team should stay silent for the entire lot, or when the nominating team should make no raise beyond its committed opening bid.
+- Every nomination is a committed $1 opening bid by nomination.nominatorTeamId. That team already owns the high bid and must take the player for $1 if nobody else bids.
+- The nominating team cannot avoid the $1 purchase by choosing pass. Account for that forced roster and budget outcome when deciding its intent; pass only prevents it from raising if another team bids.
+- For every other team, any non-pass decision means it is willing to bid at least the next legal price and pursue the player up to its sampled maximum.
 
 Decision criteria:
 - Consider roster construction, unfilled required positions, remaining slots, remaining budget, player suggested value, positional depth still available, and the recent auction market.
+- Treat suggestedValue as roster utility and marketAverage as the observed Yahoo auction market when present. Use the latter to anticipate competition, not as proof that overpaying improves the roster.
 - A team that is saturated at a position should usually pass, but may choose discount for an exceptional bargain fit.
 - Preserve enough flexibility and budget to complete a legal, balanced roster.
 - Treat each team independently even though all decisions are returned together.
@@ -49,6 +53,7 @@ Constraints:
 - Use only the supplied JSON. Do not rely on external rankings, injuries, news, ADP, depth charts, or player knowledge.
 - Do not calculate or return a bid, maximum value, explanation, confidence score, or any fields outside the schema.
 - The application samples the private maximum value from the intent and owns bid legality, exact prices, timing, and all state changes.
+- The nominator's committed opening bid is $1. Every competing bid after it rises by the league increment.
 - Return only JSON matching the requested schema.`;
 }
 
@@ -80,11 +85,18 @@ export function normalizeAutodraftContext(value = {}) {
   const requirements = value?.league?.rosterRequirements || {};
   const remaining = value?.remainingByPosition || {};
   return {
+    nomination: {
+      nominatorTeamId: cleanText(value?.nomination?.nominatorTeamId, 80),
+      openingBid: 1,
+      committedToNominator: true
+    },
     player: {
       id: cleanText(value?.player?.id, 100),
       name: cleanText(value?.player?.name, 100),
       position: cleanPosition(value?.player?.position),
-      suggestedValue: wholeNumber(value?.player?.suggestedValue)
+      suggestedValue: wholeNumber(value?.player?.suggestedValue),
+      marketAverage: wholeNumber(value?.player?.marketAverage),
+      marketProjected: wholeNumber(value?.player?.marketProjected)
     },
     league: {
       budget: wholeNumber(value?.league?.budget),

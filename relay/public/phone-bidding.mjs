@@ -52,6 +52,26 @@ export function classifyPhoneBidBatch(bids) {
   return { kind: "tie", teamIds, amount: highestAmount };
 }
 
+export function buildPhoneAuctionHistory({ sales = [], players = [], teams = [] } = {}) {
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const teamsById = new Map(teams.map((team) => [team.id, team]));
+  return sales.map((sale, index) => {
+    const player = playersById.get(sale.playerId);
+    const team = teamsById.get(sale.teamId);
+    return {
+      id: String(sale.id || `sale-${index + 1}`),
+      lotNumber: index + 1,
+      playerName: String(player?.name || "Unknown player"),
+      position: String(player?.position || "FLEX"),
+      nflTeam: String(player?.nflTeam || "FA"),
+      amount: nonNegativeInteger(sale.amount),
+      teamName: String(team?.name || "Unknown team"),
+      manager: String(team?.manager || "Unknown owner"),
+      teamColor: /^#[0-9a-f]{6}$/i.test(String(team?.color || "")) ? team.color : "#d39a20"
+    };
+  });
+}
+
 function nonNegativeInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;

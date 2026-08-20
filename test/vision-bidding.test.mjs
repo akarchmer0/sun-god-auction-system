@@ -36,8 +36,9 @@ test("printable cards use the same local ArUco dictionary as the scanner", () =>
 });
 
 test("the visual bid amount is always the next legal increment", () => {
-  assert.equal(nextVisualBidAmount({ auction: { amount: 0 }, config: { increment: 2 } }), 2);
-  assert.equal(nextVisualBidAmount({ auction: { amount: 14 }, config: { increment: 2 } }), 16);
+  assert.equal(nextVisualBidAmount({ auction: { amount: 0, highBidderId: null }, config: { increment: 2 } }), 1);
+  assert.equal(nextVisualBidAmount({ auction: { amount: 1, highBidderId: null }, config: { increment: 2 } }), 1);
+  assert.equal(nextVisualBidAmount({ auction: { amount: 14, highBidderId: "a" }, config: { increment: 2 } }), 16);
   assert.equal(VISUAL_BID_WINDOW_MS, 300);
 });
 

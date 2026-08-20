@@ -63,13 +63,14 @@ const publicAssets = new Map([
   ["/results.html", "results.html"],
   ...[
     "app.mjs", "bidder.mjs", "results.mjs", "styles.css", "bidder.css", "results.css",
-    "data.mjs", "auctioneer-voice.mjs", "auctioneer-speech-providers.mjs", "auctioneer-speed.mjs",
+    "data.mjs", "fantasy-pros-data.mjs", "auctioneer-voice.mjs", "auctioneer-speech-providers.mjs", "auctioneer-speed.mjs",
     "auctioneer-script.mjs", "auctioneer-patter.mjs", "roast-engine.mjs",
     "phone-bidding.mjs", "draft-io.mjs", "vision-bidding.mjs", "domain.mjs", "autodraft.mjs"
-    , "room-protocol.mjs", "room-transports.mjs", "draft-state-validation.mjs"
+    , "room-protocol.mjs", "room-transports.mjs", "draft-state-validation.mjs", "yahoo-market-values.mjs"
   ].map((name) => [`/src/${name}`, `src/${name}`]),
   ["/vendor/qrcodegen.js", "vendor/qrcodegen.js"]
   , ["/assets/player-template.csv", "assets/player-template.csv"]
+  , ["/assets/yahoo-market-values.json", "data/yahoo-market-values.json"]
 ]);
 const hostOnlyRoutes = new Set([
   "/api/auctioneer/status", "/api/auctioneer/speech", "/api/auctioneer/roast",

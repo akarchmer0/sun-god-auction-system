@@ -9,6 +9,8 @@
   "scripts": {
     "start": "node server.mjs",
     "desktop": "electron .",
+    "simulate:autodraft": "node scripts/simulate-autodraft.mjs",
+    "evolve:autodraft": "node scripts/evolve-autodraft-strategy.mjs",
     "test": "node --test",
     "predist:mac": "node scripts/write-release-config.mjs",
     "dist:mac": "electron-builder --mac dmg --arm64",
@@ -29,6 +31,7 @@
       "src/**/*",
       "vendor/qrcodegen.js",
       "assets/**/*",
+      "data/**/*",
       "docs/**/*",
       "*.html",
       "server.mjs",

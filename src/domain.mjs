@@ -74,10 +74,19 @@ export function maxBidForTeam(state, teamId) {
 }
 
 export function currentNominator(state) {
+  return currentNominatorEntry(state)?.team || null;
+}
+
+function currentNominatorEntry(state) {
   const order = state.nomination?.order || state.teams.map((team) => team.id);
   if (!order.length) return null;
-  const index = Number(state.nomination?.currentIndex || 0) % order.length;
-  return state.teams.find((team) => team.id === order[index]) || null;
+  const start = Number(state.nomination?.currentIndex || 0) % order.length;
+  for (let offset = 0; offset < order.length; offset += 1) {
+    const index = (start + offset) % order.length;
+    const team = state.teams.find((item) => item.id === order[index]);
+    if (team && team.roster.length < state.config.rosterSize) return { team, index };
+  }
+  return null;
 }
 
 export function canTeamRosterPlayer(state, teamId, playerId) {
@@ -91,13 +100,29 @@ export function canTeamRosterPlayer(state, teamId, playerId) {
 
 export function nominatePlayer(state, playerId) {
   const player = state.players.find((item) => item.id === playerId);
+  const nominator = currentNominatorEntry(state);
   if (!player || player.status !== "available") throw new Error("That player is not available.");
   if (!["idle", "sold", "passed"].includes(state.auction.phase)) throw new Error("Finish the current auction first.");
+  if (!nominator) throw new Error("No team has an open roster spot for another nomination.");
+  if (!canTeamRosterPlayer(state, nominator.team.id, playerId)) {
+    throw new Error(`${nominator.team.name} cannot nominate that player and still complete its required positions.`);
+  }
+  if (maxBidForTeam(state, nominator.team.id) < MIN_BID) throw new Error(`${nominator.team.name} cannot afford the $1 opening bid.`);
   return {
     ...state,
-    auction: { ...emptyAuction(), playerId, phase: "ready", nominatorTeamId: currentNominator(state)?.id || null },
+    auction: {
+      ...emptyAuction(),
+      playerId,
+      phase: "ready",
+      amount: MIN_BID,
+      highBidderId: nominator.team.id,
+      nominatorTeamId: nominator.team.id,
+      bidCount: 1,
+      lastBidAt: Date.now()
+    },
+    nomination: { ...(state.nomination || { order: state.teams.map((team) => team.id) }), currentIndex: nominator.index },
     queue: [playerId, ...state.queue.filter((id) => id !== playerId)],
-    log: addLog(state.log, "nomination", `${player.name} nominated`)
+    log: addLog(state.log, "nomination", `${nominator.team.name} nominated ${player.name} for $1`)
   };
 }
 
@@ -106,7 +131,11 @@ export function openAuction(state) {
   if (!["ready", "paused"].includes(state.auction.phase)) return state;
   return {
     ...state,
-    auction: { ...state.auction, phase: state.auction.amount > 0 ? "open" : "open" },
+    auction: {
+      ...state.auction,
+      phase: "open",
+      amount: state.auction.highBidderId ? state.auction.amount : MIN_BID
+    },
     log: addLog(state.log, "auction", `Bidding opened for ${currentPlayer(state).name}`)
   };
 }
@@ -125,11 +154,10 @@ export function placeBid(state, teamId, requestedAmount) {
   if (!canTeamRosterPlayer(state, teamId, state.auction.playerId)) {
     throw new Error(`${team.name} must leave enough roster spots to meet its position requirements.`);
   }
-  const nextBid = requestedAmount == null
-    ? Math.max(MIN_BID, state.auction.amount + state.config.increment)
-    : Number(requestedAmount);
-  if (!Number.isInteger(nextBid) || nextBid < Math.max(MIN_BID, state.auction.amount + state.config.increment)) {
-    throw new Error(`The next bid must be at least $${Math.max(MIN_BID, state.auction.amount + state.config.increment)}.`);
+  const minimumBid = nextLegalBidAmount(state);
+  const nextBid = requestedAmount == null ? minimumBid : Number(requestedAmount);
+  if (!Number.isInteger(nextBid) || nextBid < minimumBid) {
+    throw new Error(`The next bid must be at least $${minimumBid}.`);
   }
   const maxBid = maxBidForTeam(state, teamId);
   if (nextBid > maxBid) throw new Error(`${team.name} can bid at most $${maxBid} and still fill its roster.`);
@@ -145,6 +173,12 @@ export function placeBid(state, teamId, requestedAmount) {
     },
     log: addLog(state.log, "bid", `${team.name} bid $${nextBid}`)
   };
+}
+
+export function nextLegalBidAmount(state) {
+  const openingPrice = Math.max(MIN_BID, Number(state?.auction?.amount) || 0);
+  if (!state?.auction?.highBidderId) return openingPrice;
+  return openingPrice + Math.max(1, Number(state?.config?.increment) || 1);
 }
 
 export function advanceCountdown(state) {
@@ -177,15 +211,16 @@ export function sellPlayer(state) {
     nominationIndex: state.nomination?.currentIndex || 0,
     at: Date.now()
   };
+  const updatedTeams = state.teams.map((item) => item.id === highBidderId
+    ? { ...item, budget: item.budget - amount, roster: [...item.roster, { playerId, price: amount }] }
+    : item);
   return {
     ...state,
     players: state.players.map((item) => item.id === playerId ? { ...item, status: "sold" } : item),
-    teams: state.teams.map((item) => item.id === highBidderId
-      ? { ...item, budget: item.budget - amount, roster: [...item.roster, { playerId, price: amount }] }
-      : item),
+    teams: updatedTeams,
     queue: state.queue.filter((id) => id !== playerId),
     auction: { ...state.auction, phase: "sold" },
-    nomination: advanceNomination(state),
+    nomination: advanceNomination({ ...state, teams: updatedTeams }),
     sales: [...state.sales, sale],
     log: addLog(state.log, "sale", `${player.name} sold to ${team.name} for $${amount}`)
   };
@@ -208,7 +243,7 @@ export function undoLastSale(state) {
       ? { ...team, budget: team.budget + sale.amount, roster: team.roster.filter((spot) => spot.playerId !== sale.playerId) }
       : team),
     queue: [sale.playerId, ...state.queue.filter((id) => id !== sale.playerId)],
-    auction: { ...emptyAuction(), playerId: sale.playerId, phase: "ready", nominatorTeamId: sale.nominatorTeamId || null },
+    auction: { ...emptyAuction(), playerId: sale.playerId, phase: "ready", amount: MIN_BID, nominatorTeamId: sale.nominatorTeamId || null },
     nomination: { ...(state.nomination || { order: state.teams.map((team) => team.id) }), currentIndex: sale.nominationIndex ?? Math.max(0, (state.nomination?.currentIndex || 1) - 1) },
     sales: state.sales.slice(0, -1),
     log: addLog(state.log, "undo", `Reversed the sale of ${player.name}`)
@@ -232,7 +267,7 @@ export function correctSale(state, saleId, { teamId, amount, returnToPool = fals
   return {
     ...rebuilt,
     queue: returnedPlayer ? [returnedPlayer.id, ...rebuilt.queue.filter((id) => id !== returnedPlayer.id)] : rebuilt.queue,
-    auction: { ...emptyAuction(), phase: "paused", playerId: returnedPlayer?.id || null, nominatorTeamId: original.nominatorTeamId || null },
+    auction: { ...emptyAuction(), phase: "paused", playerId: returnedPlayer?.id || null, amount: returnedPlayer ? MIN_BID : 0, nominatorTeamId: original.nominatorTeamId || null },
     nomination: returnToPool
       ? { ...state.nomination, currentIndex: original.nominationIndex ?? state.nomination?.currentIndex ?? 0 }
       : rebuilt.nomination,
@@ -311,7 +346,13 @@ function normalizeNominationOrder(order, teams) {
 function advanceNomination(state) {
   const order = state.nomination?.order || state.teams.map((team) => team.id);
   if (!order.length) return { order: [], currentIndex: 0 };
-  return { order, currentIndex: ((state.nomination?.currentIndex || 0) + 1) % order.length };
+  const start = Number(state.nomination?.currentIndex || 0);
+  for (let offset = 1; offset <= order.length; offset += 1) {
+    const currentIndex = (start + offset) % order.length;
+    const team = state.teams.find((item) => item.id === order[currentIndex]);
+    if (team && team.roster.length < state.config.rosterSize) return { order, currentIndex };
+  }
+  return { order, currentIndex: start % order.length };
 }
 
 function addLog(log, type, message) {

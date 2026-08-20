@@ -51,6 +51,9 @@ test("configured AI autodraft batches teams with strict structured output", asyn
   assert.deepEqual(request.body.reasoning, { effort: "none" });
   assert.equal(request.body.text.format.type, "json_schema");
   assert.deepEqual(request.body.text.format.schema.properties.decisions.items.properties.intent.enum, ["pass", "discount", "value", "target"]);
+  assert.match(request.body.instructions, /committed \$1 opening bid by nomination\.nominatorTeamId/);
+  assert.match(request.body.instructions, /must take the player for \$1 if nobody else bids/);
+  assert.match(request.body.input, /"nominatorTeamId"/);
   assert.match(request.body.input, /"teamId":"a"/);
   assert.deepEqual(result, { decisions, provider: "openai", model: "gpt-test" });
 });

@@ -12,6 +12,7 @@ import {
   correctSale,
   currentNominator,
   canTeamRosterPlayer,
+  nextLegalBidAmount,
   countdownDelayMs,
   DEFAULT_COUNTDOWN_SECONDS
 } from "../src/domain.mjs";
@@ -31,6 +32,18 @@ function liveDraft() {
   return openAuction(draft);
 }
 
+test("every nomination commits the nominating team to a one-dollar opening bid", () => {
+  let draft = createDraft({ players, teams, budget: 20, rosterSize: 3, increment: 2 });
+  draft = nominatePlayer(draft, "puka");
+  assert.equal(draft.auction.amount, 1);
+  assert.equal(draft.auction.highBidderId, "a");
+  draft = openAuction(draft);
+  assert.equal(nextLegalBidAmount(draft), 3);
+  draft = placeBid(draft, "b");
+  assert.equal(draft.auction.amount, 3);
+  assert.equal(draft.auction.highBidderId, "b");
+});
+
 test("draft countdown windows are normalized and converted to timer delays", () => {
   const draft = createDraft({
     players,
@@ -48,49 +61,49 @@ test("draft countdown windows are normalized and converted to timer delays", () 
 });
 
 test("a bid resets the countdown and enforces the increment", () => {
-  let draft = placeBid(liveDraft(), "a", 5);
+  let draft = placeBid(liveDraft(), "b", 5);
   draft = advanceCountdown(draft);
   assert.equal(draft.auction.phase, "once");
-  draft = placeBid(draft, "b", 6);
+  draft = placeBid(draft, "a", 6);
   assert.equal(draft.auction.phase, "open");
   assert.equal(draft.auction.amount, 6);
-  assert.throws(() => placeBid(draft, "a", 6), /at least \$7/);
+  assert.throws(() => placeBid(draft, "b", 6), /at least \$7/);
 });
 
 test("teams must reserve one dollar for every remaining roster spot", () => {
   const draft = liveDraft();
   assert.equal(maxBidForTeam(draft, "a"), 18);
-  assert.throws(() => placeBid(draft, "a", 19), /at most \$18/);
+  assert.throws(() => placeBid(draft, "b", 19), /at most \$18/);
 });
 
 test("going once, twice, sold updates the ledger, roster, and budget", () => {
-  let draft = placeBid(liveDraft(), "a", 8);
+  let draft = placeBid(liveDraft(), "b", 8);
   draft = advanceCountdown(draft);
   draft = advanceCountdown(draft);
   draft = advanceCountdown(draft);
   assert.equal(draft.auction.phase, "sold");
   assert.equal(draft.players[0].status, "sold");
-  assert.equal(draft.teams[0].budget, 12);
-  assert.deepEqual(draft.teams[0].roster, [{ playerId: "puka", price: 8 }]);
+  assert.equal(draft.teams[1].budget, 12);
+  assert.deepEqual(draft.teams[1].roster, [{ playerId: "puka", price: 8 }]);
   assert.equal(draft.sales.length, 1);
 });
 
 test("undo restores the exact sale and nominates that player", () => {
-  let draft = placeBid(liveDraft(), "a", 8);
+  let draft = placeBid(liveDraft(), "b", 8);
   draft = advanceCountdown(advanceCountdown(advanceCountdown(draft)));
   draft = undoLastSale(draft);
   assert.equal(draft.players[0].status, "available");
-  assert.equal(draft.teams[0].budget, 20);
-  assert.deepEqual(draft.teams[0].roster, []);
+  assert.equal(draft.teams[1].budget, 20);
+  assert.deepEqual(draft.teams[1].roster, []);
   assert.equal(draft.auction.playerId, "puka");
   assert.equal(draft.auction.phase, "ready");
 });
 
-test("a player with no bids rotates to the back of the queue", () => {
-  let draft = advanceCountdown(liveDraft());
-  assert.equal(draft.auction.phase, "passed");
-  draft = moveToNextPlayer(draft);
-  assert.equal(draft.auction.playerId, "bijan");
+test("an uncontested nomination sells to its nominator for one dollar", () => {
+  let draft = advanceCountdown(advanceCountdown(advanceCountdown(liveDraft())));
+  assert.equal(draft.auction.phase, "sold");
+  assert.equal(draft.sales[0].teamId, "a");
+  assert.equal(draft.sales[0].amount, 1);
 });
 
 test("position requirements prevent a purchase that would make the lineup impossible", () => {
@@ -103,7 +116,8 @@ test("position requirements prevent a purchase that would make the lineup imposs
     teams: rosteredTeams,
     budget: 20,
     rosterSize: 2,
-    rosterRequirements: { QB: 1, WR: 1 }
+    rosterRequirements: { QB: 1 },
+    nominationOrder: ["b", "a"]
   });
   draft.teams[0].roster = [{ playerId: "puka", price: 4 }];
   draft = openAuction(nominatePlayer(draft, "bijan"));
@@ -141,13 +155,13 @@ test("nomination order advances after a result and rewinds with undo", () => {
 });
 
 test("historical sale correction deterministically rebuilds buyers, budgets, and the player pool", () => {
-  let draft = placeBid(liveDraft(), "a", 5);
+  let draft = placeBid(liveDraft(), "b", 5);
   draft = advanceCountdown(advanceCountdown(advanceCountdown(draft)));
   const saleId = draft.sales[0].id;
-  const corrected = correctSale(draft, saleId, { teamId: "b", amount: 7 });
-  assert.equal(corrected.teams.find((team) => team.id === "a").budget, 20);
-  assert.equal(corrected.teams.find((team) => team.id === "b").budget, 13);
-  assert.deepEqual(corrected.teams.find((team) => team.id === "b").roster, [{ playerId: "puka", price: 7 }]);
+  const corrected = correctSale(draft, saleId, { teamId: "a", amount: 7 });
+  assert.equal(corrected.teams.find((team) => team.id === "b").budget, 20);
+  assert.equal(corrected.teams.find((team) => team.id === "a").budget, 13);
+  assert.deepEqual(corrected.teams.find((team) => team.id === "a").roster, [{ playerId: "puka", price: 7 }]);
   assert.equal(corrected.auction.phase, "paused");
 
   const returned = correctSale(corrected, saleId, { returnToPool: true });

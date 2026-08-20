@@ -96,11 +96,27 @@ The nomination turn follows the order configured during league setup and advance
 
 ### Hybrid auto draft
 
-Mark any team as **Auto draft** during league setup. Auto teams cannot be claimed by a phone. When a player is nominated, Sun God makes one batched strategic decision for every auto team: **pass**, **discount**, **value**, or **target**. A pass stays silent for the whole lot. The other intents sample a private maximum from a normal distribution centered at 90%, 100%, or 110% of suggested value, respectively, with a standard deviation of 5% of suggested value. Every auto bid is one legal increment above the current high bid and stops when the next increment would exceed that frozen maximum. Roster eligibility, salary-cap reserves, and every state change pass through the same auction engine as human bids.
+Mark any team as **Auto draft** during league setup. Auto teams cannot be claimed by a phone. Every nomination is a committed $1 opening bid by the nominating team, so that team receives the player for $1 if nobody raises; later bids rise by the configured increment. Sun God makes one batched strategic decision for every auto team: **pass**, **discount**, **value**, or **target**. A pass stays silent for a non-nominator; for the nominating team, it means accepting the forced $1 opening bid but making no further raise. The other intents sample a private maximum from a normal distribution centered at 90%, 100%, or 110% of suggested value, respectively, with a standard deviation of 5% of suggested value. Every later auto bid is one legal increment above the current high bid and stops when the next increment would exceed that frozen maximum. Roster eligibility, salary-cap reserves, and every state change pass through the same auction engine as human bids.
 
 With `OPENAI_API_KEY`, the server uses one structured `gpt-5.6-luna` request per nomination and freezes the result before live bidding. The model receives only displayed draft facts, team construction, positional availability, and recent price/value ratios—never phone tokens or identifiers. If the request is unavailable, invalid, late, or slower than 1.8 seconds, the balanced local strategy is used immediately and any late response is ignored. Set `OPENAI_AUTODRAFT_MODEL` to override the intent model.
 
 Auto nominators choose a legal player from the remaining pool and start the next auction after their intent decisions are ready. Human nominators keep the normal player-board and **Start auction** controls. The host can pause, undo, or use the laptop bid buttons at any time.
+
+Run a complete sequential simulation and write a self-contained HTML roster report without installing npm:
+
+```bash
+./simulate-autodraft.command
+```
+
+By default, the simulator resets and uses only the bundled 315-player FantasyPros CSV snapshot in a 12-team league. Its standard lineup is 1 QB, 2 RB, 3 WR, 1 TE, 1 FLEX, 1 K, and 1 DST, with the remaining roster spots treated as bench. The exact FantasyPros values—including $0 entries—remain roster utility and the anchor for local opponent bid ceilings. Pass `--help` for CSV, league, seed, output, and OpenAI/local-mode overrides. If Node and npm are installed, `npm run simulate:autodraft` remains an equivalent option.
+
+Train a player-by-player maximum-bid vector with evolutionary search:
+
+```bash
+./evolve-autodraft.command
+```
+
+One controlled team uses each candidate policy against the normal local autodrafters. The compact policy generates maximum bids from the FantasyPros CSV value, elite-value curvature, position, roster need, scarcity, and budget flexibility; a separate parameter set controls nominations. By default, fitness is `Σ value + 0.5 × Σ value² / 50`, averaged across multiple nomination seats. The L1 term rewards total roster quality while the scaled L2 term preserves a preference for elite players. Tune the blend with `--l2-weight` and `--value-scale` (use `--l2-weight 0` for pure L1). The trainer writes `artifacts/evolved-autodraft-strategy.json` with the policy parameters and a neutral-context reference ceiling for every player, plus `artifacts/evolved-autodraft-report.html` with search history and an example roster. Run `./evolve-autodraft.command --help` to adjust population, generations, evaluation seats, mutation, league settings, or output paths.
 
 ## Five-minute league setup
 
@@ -116,7 +132,7 @@ Number keys 1–9 place quick bids. Space advances the countdown manually.
 
 ## Player CSV
 
-The bundled player board contains fictional data for demonstrations and preflight testing only. It does not include or imply licensed rankings, projections, or auction values. Import a commissioner-provided CSV before a real draft.
+The player board defaults to the supplied 315-player FantasyPros CSV snapshot. The **Reload FantasyPros values** control restores that exact list and resets the draft; no fictional player pool or secondary market-value source is mixed into it.
 
 Importing a CSV opens a column-mapping preview before it resets the draft. Map player name and position, then optionally map NFL team and suggested auction value. Common headings such as `Player Name`, `Athlete`, `Pos`, `Pro Team`, and `Auction Value` are matched automatically, while quoted names and values containing commas are supported.
 
@@ -126,7 +142,7 @@ Example Player,WR,FA,42
 Another Player,RB,FA,55
 ```
 
-The demo reload button restores only the fictional sample data.
+The FantasyPros reload button preserves the configured league format while clearing rosters, sales, and auction progress.
 
 ## Results and exports
 

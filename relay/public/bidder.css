@@ -33,6 +33,7 @@ button { color: inherit; }
 .phone-team-list small { margin-top: 3px; color: #746a5a; font-size: 10px; }
 .phone-team-list b { font: 600 8px/1 "DM Mono", monospace; letter-spacing: .08em; }
 .bidder-room { flex: 1; min-height: calc(100dvh - 68px); display: flex; flex-direction: column; padding: 18px 18px max(18px, env(safe-area-inset-bottom)); }
+.bidder-room.is-history { height: calc(100dvh - 68px); min-height: 0; max-height: calc(100dvh - 68px); flex: 0 0 calc(100dvh - 68px); overflow: hidden; }
 .phone-team-header { display: flex; align-items: center; justify-content: space-between; border-left: 8px solid var(--team); padding: 4px 0 4px 11px; }
 .phone-team-header small, .phone-team-header strong, .phone-team-header b { display: block; }
 .phone-team-header small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .13em; }
@@ -40,6 +41,7 @@ button { color: inherit; }
 .phone-team-header b { margin-top: 4px; color: #746a5a; font-size: 9px; }
 .phone-team-header button { border: 0; background: none; color: #746a5a; font-size: 9px; text-decoration: underline; }
 .phone-tabs { min-height: 43px; margin-top: 17px; border: 1px solid #211c15; border-radius: 7px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #eadfc9; }
+.phone-tabs.has-history { grid-template-columns: repeat(3, 1fr); }
 .phone-tabs button { border: 0; border-radius: 4px; background: transparent; color: #746a5a; font-size: 10px; font-weight: 800; cursor: pointer; }
 .phone-tabs button.is-active { background: #17130e; color: #f6eedc; }
 .phone-tabs button b { min-width: 17px; height: 17px; margin-left: 5px; border: 1px solid currentColor; border-radius: 9px; display: inline-grid; place-items: center; font: 600 7px/1 "DM Mono", monospace; }
@@ -49,6 +51,12 @@ button { color: inherit; }
 .phone-price small { display: block; color: #746a5a; font: 600 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
 .phone-price strong { display: block; margin-top: 3px; font-size: 78px; line-height: .95; letter-spacing: -.07em; }
 .phone-price sup { color: #d39a20; font-size: 25px; vertical-align: top; position: relative; top: 8px; }
+.phone-bid-holder { max-width: min(320px, calc(100vw - 52px)); min-height: 34px; margin: 11px auto 0; padding: 5px 9px; border: 1px solid #a99c83; border-radius: 7px; display: flex; align-items: center; gap: 8px; background: #fff9ed; text-align: left; }
+.phone-bid-holder > i { width: 8px; height: 22px; flex: 0 0 8px; border-radius: 2px; background: var(--bid-holder); }
+.phone-bid-holder > span { min-width: 0; flex: 1; }
+.phone-bid-holder small { color: #746a5a; font: 600 6px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.phone-bid-holder b { display: block; margin-top: 3px; overflow: hidden; font-size: 11px; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.phone-bid-holder em { color: #746a5a; font-size: 9px; font-style: normal; white-space: nowrap; }
 .phone-phase { margin-top: 13px; color: #746a5a; font: 600 9px/1 "DM Mono", monospace; letter-spacing: .13em; text-transform: uppercase; }
 .bid-button { width: 100%; min-height: 116px; border: 2px solid #17130e; border-radius: 14px; background: #d39a20; color: #17130e; box-shadow: 0 8px 0 #17130e; font-size: 33px; font-weight: 800; letter-spacing: -.04em; cursor: pointer; touch-action: manipulation; }
 .bid-button:active:not(:disabled) { transform: translateY(6px); box-shadow: 0 2px 0 #17130e; }
@@ -81,14 +89,32 @@ button { color: inherit; }
 .phone-budget small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .11em; }
 .phone-budget strong { margin-top: 5px; font-size: 15px; }
 .phone-roster-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.phone-roster-title { padding: 25px 2px 17px; border-bottom: 1px solid #211c15; }
-.phone-roster-title h1 { margin: 7px 0 5px; font-size: 31px; line-height: 1; letter-spacing: -.045em; }
+.phone-roster-title { position: relative; z-index: 2; padding: 17px 2px 13px; border-bottom: 1px solid #211c15; }
+.phone-roster-picker { width: 100%; min-height: 70px; padding: 9px 11px; border: 1px solid #211c15; border-radius: 8px; display: flex; align-items: center; gap: 10px; background: #fff9ed; text-align: left; cursor: pointer; touch-action: manipulation; }
+.phone-roster-picker > i { width: 9px; height: 42px; flex: 0 0 9px; border-radius: 3px; background: var(--roster-team); }
+.phone-roster-picker > span { min-width: 0; flex: 1; }
+.phone-roster-picker small, .phone-roster-picker strong, .phone-roster-picker b { display: block; }
+.phone-roster-picker small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.phone-roster-picker strong { margin-top: 5px; overflow: hidden; font-size: 17px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.phone-roster-picker b { margin-top: 4px; color: #746a5a; font-size: 9px; }
+.phone-roster-picker em { color: #746a5a; font: 700 7px/1 "DM Mono", monospace; font-style: normal; letter-spacing: .08em; }
+.phone-roster-picker u { margin-left: 5px; font-size: 13px; text-decoration: none; }
+.phone-roster-menu { position: absolute; z-index: 4; top: 91px; left: 2px; right: 2px; max-height: min(330px, 48vh); padding: 5px; border: 1px solid #211c15; border-radius: 8px; display: grid; gap: 3px; background: #f6eedc; box-shadow: 0 9px 0 rgba(23,19,14,.22); overflow-y: auto; overscroll-behavior: contain; }
+.phone-roster-menu button { min-height: 54px; padding: 6px 9px; border: 1px solid transparent; border-radius: 5px; display: flex; align-items: center; gap: 9px; background: transparent; text-align: left; cursor: pointer; }
+.phone-roster-menu button.is-selected { border-color: #211c15; background: #eadfc9; }
+.phone-roster-menu button > i { width: 7px; height: 32px; flex: 0 0 7px; border-radius: 2px; }
+.phone-roster-menu button > span { min-width: 0; flex: 1; }
+.phone-roster-menu strong, .phone-roster-menu small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-roster-menu strong { font-size: 12px; }
+.phone-roster-menu small { margin-top: 4px; color: #746a5a; font-size: 9px; }
+.phone-roster-menu button > b { font: 700 9px/1 "DM Mono", monospace; }
 .phone-roster-title p { margin: 0; color: #746a5a; font-size: 10px; line-height: 1.45; }
+.phone-roster-title > p { margin-top: 8px; }
 .phone-roster-view .phone-budget { margin-top: 12px; flex: 0 0 66px; min-height: 66px; }
 .phone-roster-list { flex: 1; min-height: 150px; margin-top: 12px; border-top: 1px solid #211c15; overflow-y: auto; overscroll-behavior: contain; }
 .phone-roster-row { min-height: 59px; border-bottom: 1px solid #211c15; display: grid; grid-template-columns: 22px 36px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .roster-index { color: #746a5a; font: 500 7px/1 "DM Mono", monospace; }
-.roster-position { height: 25px; border: 1px solid #211c15; border-radius: 4px; display: grid; place-items: center; background: color-mix(in srgb, var(--team), #f6eedc 78%); font: 700 8px/1 "DM Mono", monospace; }
+.roster-position { height: 25px; border: 1px solid #211c15; border-radius: 4px; display: grid; place-items: center; background: color-mix(in srgb, var(--roster-team, var(--team)), #f6eedc 78%); font: 700 8px/1 "DM Mono", monospace; }
 .roster-player { min-width: 0; }
 .roster-player strong, .roster-player small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roster-player strong { font-size: 12px; }
@@ -97,5 +123,27 @@ button { color: inherit; }
 .phone-roster-empty { min-height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #746a5a; }
 .phone-roster-empty strong { color: #17130e; font-size: 14px; }
 .phone-roster-empty span { max-width: 230px; margin-top: 6px; font-size: 10px; line-height: 1.45; }
+.phone-history-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.phone-history-title { padding: 25px 2px 17px; border-bottom: 1px solid #211c15; }
+.phone-history-title h1 { margin: 7px 0 5px; font-size: 31px; line-height: 1; letter-spacing: -.045em; }
+.phone-history-title p { margin: 0; color: #746a5a; font-size: 10px; line-height: 1.45; }
+.phone-history-list { flex: 1; min-height: 180px; margin-top: 12px; border-top: 1px solid #211c15; overflow-y: auto; overscroll-behavior: contain; }
+.phone-history-row { min-height: 92px; padding: 11px 0; border-bottom: 1px solid #211c15; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 8px; }
+.history-lot { grid-row: 1 / span 2; align-self: start; margin-top: 3px; color: #746a5a; font: 500 7px/1 "DM Mono", monospace; }
+.history-player { min-width: 0; }
+.history-player small, .history-player strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-player small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.history-player strong { margin-top: 4px; font-size: 13px; }
+.phone-history-row > b { align-self: center; font: 700 17px/1 "DM Mono", monospace; }
+.history-winner { grid-column: 2 / 4; min-width: 0; display: flex; align-items: center; gap: 7px; }
+.history-winner > i { width: 6px; height: 29px; flex: 0 0 6px; border-radius: 2px; background: var(--history-team); }
+.history-winner > span { min-width: 0; }
+.history-winner small, .history-winner strong, .history-winner em { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-winner small { color: #746a5a; font: 600 6px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.history-winner strong { margin-top: 3px; font-size: 10px; }
+.history-winner em { margin-top: 2px; color: #746a5a; font-size: 8px; font-style: normal; }
+.phone-history-empty { min-height: 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #746a5a; }
+.phone-history-empty strong { color: #17130e; font-size: 14px; }
+.phone-history-empty span { max-width: 240px; margin-top: 6px; font-size: 10px; line-height: 1.45; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 620px) { body { display: grid; place-items: center; padding: 24px; } .bidder-shell { width: 430px; min-height: min(860px, calc(100dvh - 48px)); border: 1px solid #211c15; box-shadow: 14px 14px 0 rgba(23,19,14,.18); } .bidder-room { min-height: 700px; } }

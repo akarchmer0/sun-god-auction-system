@@ -1,0 +1,1631 @@
+{
+  "importedAt": "2026-07-31T19:32:51.675Z",
+  "source": "Yahoo Fantasy current average and projected auction values",
+  "calibration": {
+    "intercept": 0.5368864098389476,
+    "linear": 0.7778397300023772,
+    "quadratic": 0.004959046862292035
+  },
+  "players": [
+    {
+      "name": "Jahmyr Gibbs",
+      "nflTeam": "DET",
+      "position": "RB",
+      "rank": 1,
+      "draftedPercentage": 100,
+      "averageValue": 73.1,
+      "projectedValue": 64
+    },
+    {
+      "name": "Bijan Robinson",
+      "nflTeam": "ATL",
+      "position": "RB",
+      "rank": 2,
+      "draftedPercentage": 100,
+      "averageValue": 72.5,
+      "projectedValue": 60
+    },
+    {
+      "name": "Ja'Marr Chase",
+      "nflTeam": "CIN",
+      "position": "WR",
+      "rank": 3,
+      "draftedPercentage": 100,
+      "averageValue": 65.7,
+      "projectedValue": 60
+    },
+    {
+      "name": "Puka Nacua",
+      "nflTeam": "LAR",
+      "position": "WR",
+      "rank": 4,
+      "draftedPercentage": 100,
+      "averageValue": 62.8,
+      "projectedValue": 59
+    },
+    {
+      "name": "Christian McCaffrey",
+      "nflTeam": "SF",
+      "position": "RB",
+      "rank": 6,
+      "draftedPercentage": 100,
+      "averageValue": 61,
+      "projectedValue": 58
+    },
+    {
+      "name": "Jaxon Smith-Njigba",
+      "nflTeam": "SEA",
+      "position": "WR",
+      "rank": 5,
+      "draftedPercentage": 100,
+      "averageValue": 60.2,
+      "projectedValue": 58
+    },
+    {
+      "name": "Jonathan Taylor",
+      "nflTeam": "IND",
+      "position": "RB",
+      "rank": 7,
+      "draftedPercentage": 100,
+      "averageValue": 57.7,
+      "projectedValue": 58
+    },
+    {
+      "name": "Amon-Ra St. Brown",
+      "nflTeam": "DET",
+      "position": "WR",
+      "rank": 8,
+      "draftedPercentage": 100,
+      "averageValue": 54.4,
+      "projectedValue": 57
+    },
+    {
+      "name": "CeeDee Lamb",
+      "nflTeam": "DAL",
+      "position": "WR",
+      "rank": 9,
+      "draftedPercentage": 100,
+      "averageValue": 53.5,
+      "projectedValue": 52
+    },
+    {
+      "name": "James Cook III",
+      "nflTeam": "BUF",
+      "position": "RB",
+      "rank": 10,
+      "draftedPercentage": 100,
+      "averageValue": 53.5,
+      "projectedValue": 50
+    },
+    {
+      "name": "Justin Jefferson",
+      "nflTeam": "MIN",
+      "position": "WR",
+      "rank": 11,
+      "draftedPercentage": 100,
+      "averageValue": 48.5,
+      "projectedValue": 48
+    },
+    {
+      "name": "Ashton Jeanty",
+      "nflTeam": "LV",
+      "position": "RB",
+      "rank": 12,
+      "draftedPercentage": 100,
+      "averageValue": 48.2,
+      "projectedValue": 44
+    },
+    {
+      "name": "Saquon Barkley",
+      "nflTeam": "PHI",
+      "position": "RB",
+      "rank": 13,
+      "draftedPercentage": 100,
+      "averageValue": 46.2,
+      "projectedValue": 46
+    },
+    {
+      "name": "Chase Brown",
+      "nflTeam": "CIN",
+      "position": "RB",
+      "rank": 16,
+      "draftedPercentage": 100,
+      "averageValue": 44.7,
+      "projectedValue": 42
+    },
+    {
+      "name": "De'Von Achane",
+      "nflTeam": "MIA",
+      "position": "RB",
+      "rank": 20,
+      "draftedPercentage": 100,
+      "averageValue": 44.4,
+      "projectedValue": 38
+    },
+    {
+      "name": "Omarion Hampton",
+      "nflTeam": "LAC",
+      "position": "RB",
+      "rank": 19,
+      "draftedPercentage": 100,
+      "averageValue": 42.9,
+      "projectedValue": 41
+    },
+    {
+      "name": "Drake London",
+      "nflTeam": "ATL",
+      "position": "WR",
+      "rank": 14,
+      "draftedPercentage": 100,
+      "averageValue": 41,
+      "projectedValue": 42
+    },
+    {
+      "name": "Kenneth Walker III",
+      "nflTeam": "KC",
+      "position": "RB",
+      "rank": 15,
+      "draftedPercentage": 100,
+      "averageValue": 39.2,
+      "projectedValue": 43
+    },
+    {
+      "name": "Nico Collins",
+      "nflTeam": "HOU",
+      "position": "WR",
+      "rank": 17,
+      "draftedPercentage": 100,
+      "averageValue": 37.3,
+      "projectedValue": 37
+    },
+    {
+      "name": "Brock Bowers",
+      "nflTeam": "LV",
+      "position": "TE",
+      "rank": 18,
+      "draftedPercentage": 100,
+      "averageValue": 37,
+      "projectedValue": 35
+    },
+    {
+      "name": "Derrick Henry",
+      "nflTeam": "BAL",
+      "position": "RB",
+      "rank": 21,
+      "draftedPercentage": 100,
+      "averageValue": 36.3,
+      "projectedValue": 36
+    },
+    {
+      "name": "Trey McBride",
+      "nflTeam": "ARI",
+      "position": "TE",
+      "rank": 25,
+      "draftedPercentage": 100,
+      "averageValue": 32.4,
+      "projectedValue": 30
+    },
+    {
+      "name": "Josh Allen",
+      "nflTeam": "BUF",
+      "position": "QB",
+      "rank": 27,
+      "draftedPercentage": 100,
+      "averageValue": 32.2,
+      "projectedValue": 29
+    },
+    {
+      "name": "George Pickens",
+      "nflTeam": "DAL",
+      "position": "WR",
+      "rank": 22,
+      "draftedPercentage": 100,
+      "averageValue": 32,
+      "projectedValue": 34
+    },
+    {
+      "name": "Jeremiyah Love",
+      "nflTeam": "ARI",
+      "position": "RB",
+      "rank": 26,
+      "draftedPercentage": 100,
+      "averageValue": 30.9,
+      "projectedValue": 31
+    },
+    {
+      "name": "A.J. Brown",
+      "nflTeam": "NE",
+      "position": "WR",
+      "rank": 24,
+      "draftedPercentage": 100,
+      "averageValue": 28.5,
+      "projectedValue": 33
+    },
+    {
+      "name": "Josh Jacobs",
+      "nflTeam": "GB",
+      "position": "RB",
+      "rank": 35,
+      "draftedPercentage": 100,
+      "averageValue": 26.6,
+      "projectedValue": 23
+    },
+    {
+      "name": "Malik Nabers",
+      "nflTeam": "NYG",
+      "position": "WR",
+      "rank": 49,
+      "draftedPercentage": 100,
+      "averageValue": 25.3,
+      "projectedValue": 21
+    },
+    {
+      "name": "Kyren Williams",
+      "nflTeam": "LAR",
+      "position": "RB",
+      "rank": 32,
+      "draftedPercentage": 100,
+      "averageValue": 24.6,
+      "projectedValue": 25
+    },
+    {
+      "name": "Chris Olave",
+      "nflTeam": "NO",
+      "position": "WR",
+      "rank": 29,
+      "draftedPercentage": 100,
+      "averageValue": 24.4,
+      "projectedValue": 26
+    },
+    {
+      "name": "Rashee Rice",
+      "nflTeam": "KC",
+      "position": "WR",
+      "rank": 30,
+      "draftedPercentage": 100,
+      "averageValue": 24.1,
+      "projectedValue": 27
+    },
+    {
+      "name": "DeVonta Smith",
+      "nflTeam": "PHI",
+      "position": "WR",
+      "rank": 23,
+      "draftedPercentage": 100,
+      "averageValue": 23.8,
+      "projectedValue": 32
+    },
+    {
+      "name": "Javonte Williams",
+      "nflTeam": "DAL",
+      "position": "RB",
+      "rank": 34,
+      "draftedPercentage": 100,
+      "averageValue": 21.6,
+      "projectedValue": 20
+    },
+    {
+      "name": "Tee Higgins",
+      "nflTeam": "CIN",
+      "position": "WR",
+      "rank": 28,
+      "draftedPercentage": 100,
+      "averageValue": 19.8,
+      "projectedValue": 28
+    },
+    {
+      "name": "Breece Hall",
+      "nflTeam": "NYJ",
+      "position": "RB",
+      "rank": 36,
+      "draftedPercentage": 100,
+      "averageValue": 19.4,
+      "projectedValue": 24
+    },
+    {
+      "name": "Lamar Jackson",
+      "nflTeam": "BAL",
+      "position": "QB",
+      "rank": 41,
+      "draftedPercentage": 100,
+      "averageValue": 19,
+      "projectedValue": 15
+    },
+    {
+      "name": "Tetairoa McMillan",
+      "nflTeam": "CAR",
+      "position": "WR",
+      "rank": 38,
+      "draftedPercentage": 100,
+      "averageValue": 18.6,
+      "projectedValue": 18
+    },
+    {
+      "name": "Colston Loveland",
+      "nflTeam": "CHI",
+      "position": "TE",
+      "rank": 37,
+      "draftedPercentage": 100,
+      "averageValue": 18.3,
+      "projectedValue": 19
+    },
+    {
+      "name": "Travis Etienne Jr.",
+      "nflTeam": "NO",
+      "position": "RB",
+      "rank": 45,
+      "draftedPercentage": 100,
+      "averageValue": 17.9,
+      "projectedValue": 17
+    },
+    {
+      "name": "Cam Skattebo",
+      "nflTeam": "NYG",
+      "position": "RB",
+      "rank": 43,
+      "draftedPercentage": 100,
+      "averageValue": 16.1,
+      "projectedValue": 17
+    },
+    {
+      "name": "Zay Flowers",
+      "nflTeam": "BAL",
+      "position": "WR",
+      "rank": 33,
+      "draftedPercentage": 100,
+      "averageValue": 14.9,
+      "projectedValue": 26
+    },
+    {
+      "name": "Garrett Wilson",
+      "nflTeam": "NYJ",
+      "position": "WR",
+      "rank": 39,
+      "draftedPercentage": 100,
+      "averageValue": 14.4,
+      "projectedValue": 17
+    },
+    {
+      "name": "Ladd McConkey",
+      "nflTeam": "LAC",
+      "position": "WR",
+      "rank": 42,
+      "draftedPercentage": 100,
+      "averageValue": 13.4,
+      "projectedValue": 17
+    },
+    {
+      "name": "Jaylen Waddle",
+      "nflTeam": "DEN",
+      "position": "WR",
+      "rank": 31,
+      "draftedPercentage": 100,
+      "averageValue": 13.1,
+      "projectedValue": 20
+    },
+    {
+      "name": "Emeka Egbuka",
+      "nflTeam": "TB",
+      "position": "WR",
+      "rank": 40,
+      "draftedPercentage": 100,
+      "averageValue": 12.7,
+      "projectedValue": 17
+    },
+    {
+      "name": "Bucky Irving",
+      "nflTeam": "TB",
+      "position": "RB",
+      "rank": 62,
+      "draftedPercentage": 100,
+      "averageValue": 12.5,
+      "projectedValue": 8
+    },
+    {
+      "name": "Davante Adams",
+      "nflTeam": "LAR",
+      "position": "WR",
+      "rank": 48,
+      "draftedPercentage": 100,
+      "averageValue": 12.4,
+      "projectedValue": 14
+    },
+    {
+      "name": "Tyler Warren",
+      "nflTeam": "IND",
+      "position": "TE",
+      "rank": 58,
+      "draftedPercentage": 100,
+      "averageValue": 12.3,
+      "projectedValue": 10
+    },
+    {
+      "name": "Drake Maye",
+      "nflTeam": "NE",
+      "position": "QB",
+      "rank": 59,
+      "draftedPercentage": 100,
+      "averageValue": 12.3,
+      "projectedValue": 8
+    },
+    {
+      "name": "David Montgomery",
+      "nflTeam": "HOU",
+      "position": "RB",
+      "rank": 55,
+      "draftedPercentage": 100,
+      "averageValue": 11.6,
+      "projectedValue": 13
+    },
+    {
+      "name": "D'Andre Swift",
+      "nflTeam": "CHI",
+      "position": "RB",
+      "rank": 47,
+      "draftedPercentage": 100,
+      "averageValue": 11.2,
+      "projectedValue": 15
+    },
+    {
+      "name": "Joe Burrow",
+      "nflTeam": "CIN",
+      "position": "QB",
+      "rank": 53,
+      "draftedPercentage": 100,
+      "averageValue": 11.2,
+      "projectedValue": 7
+    },
+    {
+      "name": "Quinshon Judkins",
+      "nflTeam": "CLE",
+      "position": "RB",
+      "rank": 52,
+      "draftedPercentage": 100,
+      "averageValue": 10.9,
+      "projectedValue": 13
+    },
+    {
+      "name": "Luther Burden III",
+      "nflTeam": "CHI",
+      "position": "WR",
+      "rank": 46,
+      "draftedPercentage": 100,
+      "averageValue": 10.8,
+      "projectedValue": 16
+    },
+    {
+      "name": "Brian Robinson",
+      "nflTeam": "ATL",
+      "position": "RB",
+      "rank": 145,
+      "draftedPercentage": 5,
+      "averageValue": 10.5,
+      "projectedValue": 1
+    },
+    {
+      "name": "Terry McLaurin",
+      "nflTeam": "WAS",
+      "position": "WR",
+      "rank": 44,
+      "draftedPercentage": 100,
+      "averageValue": 9.9,
+      "projectedValue": 17
+    },
+    {
+      "name": "TreVeyon Henderson",
+      "nflTeam": "NE",
+      "position": "RB",
+      "rank": 63,
+      "draftedPercentage": 100,
+      "averageValue": 9.7,
+      "projectedValue": 7
+    },
+    {
+      "name": "Bhayshul Tuten",
+      "nflTeam": "JAX",
+      "position": "RB",
+      "rank": 60,
+      "draftedPercentage": 100,
+      "averageValue": 8.6,
+      "projectedValue": 8
+    },
+    {
+      "name": "Jadarian Price",
+      "nflTeam": "SEA",
+      "position": "RB",
+      "rank": 66,
+      "draftedPercentage": 100,
+      "averageValue": 8.4,
+      "projectedValue": 7
+    },
+    {
+      "name": "Jayden Daniels",
+      "nflTeam": "WAS",
+      "position": "QB",
+      "rank": 56,
+      "draftedPercentage": 100,
+      "averageValue": 7.8,
+      "projectedValue": 7
+    },
+    {
+      "name": "Jameson Williams",
+      "nflTeam": "DET",
+      "position": "WR",
+      "rank": 51,
+      "draftedPercentage": 100,
+      "averageValue": 7.2,
+      "projectedValue": 11
+    },
+    {
+      "name": "DJ Moore",
+      "nflTeam": "BUF",
+      "position": "WR",
+      "rank": 57,
+      "draftedPercentage": 100,
+      "averageValue": 6.8,
+      "projectedValue": 9
+    },
+    {
+      "name": "Jalen Hurts",
+      "nflTeam": "PHI",
+      "position": "QB",
+      "rank": 64,
+      "draftedPercentage": 100,
+      "averageValue": 6.7,
+      "projectedValue": 7
+    },
+    {
+      "name": "Mike Evans",
+      "nflTeam": "SF",
+      "position": "WR",
+      "rank": 61,
+      "draftedPercentage": 100,
+      "averageValue": 6.6,
+      "projectedValue": 9
+    },
+    {
+      "name": "Tucker Kraft",
+      "nflTeam": "GB",
+      "position": "TE",
+      "rank": 72,
+      "draftedPercentage": 100,
+      "averageValue": 6.3,
+      "projectedValue": 5
+    },
+    {
+      "name": "Chuba Hubbard",
+      "nflTeam": "CAR",
+      "position": "RB",
+      "rank": 71,
+      "draftedPercentage": 100,
+      "averageValue": 5.9,
+      "projectedValue": 5
+    },
+    {
+      "name": "Christian Watson",
+      "nflTeam": "GB",
+      "position": "WR",
+      "rank": 50,
+      "draftedPercentage": 100,
+      "averageValue": 5.4,
+      "projectedValue": 11
+    },
+    {
+      "name": "Rome Odunze",
+      "nflTeam": "CHI",
+      "position": "WR",
+      "rank": 54,
+      "draftedPercentage": 100,
+      "averageValue": 5,
+      "projectedValue": 12
+    },
+    {
+      "name": "Brandon Aubrey",
+      "nflTeam": "DAL",
+      "position": "K",
+      "rank": 164,
+      "draftedPercentage": 100,
+      "averageValue": 4.9,
+      "projectedValue": 1
+    },
+    {
+      "name": "Sam LaPorta",
+      "nflTeam": "DET",
+      "position": "TE",
+      "rank": 79,
+      "draftedPercentage": 100,
+      "averageValue": 4.2,
+      "projectedValue": 4
+    },
+    {
+      "name": "Jaylen Warren",
+      "nflTeam": "PIT",
+      "position": "RB",
+      "rank": 74,
+      "draftedPercentage": 100,
+      "averageValue": 4.1,
+      "projectedValue": 5
+    },
+    {
+      "name": "Justin Herbert",
+      "nflTeam": "LAC",
+      "position": "QB",
+      "rank": 68,
+      "draftedPercentage": 100,
+      "averageValue": 3.9,
+      "projectedValue": 6
+    },
+    {
+      "name": "Harold Fannin Jr.",
+      "nflTeam": "CLE",
+      "position": "TE",
+      "rank": 85,
+      "draftedPercentage": 100,
+      "averageValue": 3.9,
+      "projectedValue": 3
+    },
+    {
+      "name": "Carnell Tate",
+      "nflTeam": "TEN",
+      "position": "WR",
+      "rank": 69,
+      "draftedPercentage": 100,
+      "averageValue": 3.7,
+      "projectedValue": 5
+    },
+    {
+      "name": "Texans",
+      "nflTeam": "HOU",
+      "position": "DST",
+      "rank": 146,
+      "draftedPercentage": 100,
+      "averageValue": 3.7,
+      "projectedValue": 1
+    },
+    {
+      "name": "Rams",
+      "nflTeam": "LAR",
+      "position": "DST",
+      "rank": 160,
+      "draftedPercentage": 100,
+      "averageValue": 3.7,
+      "projectedValue": 1
+    },
+    {
+      "name": "Marvin Harrison Jr.",
+      "nflTeam": "ARI",
+      "position": "WR",
+      "rank": 73,
+      "draftedPercentage": 100,
+      "averageValue": 3.6,
+      "projectedValue": 5
+    },
+    {
+      "name": "Rico Dowdle",
+      "nflTeam": "PIT",
+      "position": "RB",
+      "rank": 84,
+      "draftedPercentage": 100,
+      "averageValue": 3.6,
+      "projectedValue": 3
+    },
+    {
+      "name": "Jaxson Dart",
+      "nflTeam": "NYG",
+      "position": "QB",
+      "rank": 92,
+      "draftedPercentage": 100,
+      "averageValue": 3.6,
+      "projectedValue": 2
+    },
+    {
+      "name": "Tony Pollard",
+      "nflTeam": "TEN",
+      "position": "RB",
+      "rank": 77,
+      "draftedPercentage": 100,
+      "averageValue": 3.5,
+      "projectedValue": 4
+    },
+    {
+      "name": "Alec Pierce",
+      "nflTeam": "IND",
+      "position": "WR",
+      "rank": 78,
+      "draftedPercentage": 100,
+      "averageValue": 3.5,
+      "projectedValue": 4
+    },
+    {
+      "name": "Caleb Williams",
+      "nflTeam": "CHI",
+      "position": "QB",
+      "rank": 70,
+      "draftedPercentage": 100,
+      "averageValue": 3.4,
+      "projectedValue": 5
+    },
+    {
+      "name": "Kyle Pitts Sr.",
+      "nflTeam": "ATL",
+      "position": "TE",
+      "rank": 82,
+      "draftedPercentage": 100,
+      "averageValue": 3.4,
+      "projectedValue": 3
+    },
+    {
+      "name": "Dak Prescott",
+      "nflTeam": "DAL",
+      "position": "QB",
+      "rank": 83,
+      "draftedPercentage": 100,
+      "averageValue": 3.4,
+      "projectedValue": 3
+    },
+    {
+      "name": "Rhamondre Stevenson",
+      "nflTeam": "NE",
+      "position": "RB",
+      "rank": 75,
+      "draftedPercentage": 100,
+      "averageValue": 3.2,
+      "projectedValue": 5
+    },
+    {
+      "name": "Jonathon Brooks",
+      "nflTeam": "CAR",
+      "position": "RB",
+      "rank": 100,
+      "draftedPercentage": 76,
+      "averageValue": 3.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Blake Corum",
+      "nflTeam": "LAR",
+      "position": "RB",
+      "rank": 90,
+      "draftedPercentage": 100,
+      "averageValue": 2.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "Kyle Monangai",
+      "nflTeam": "CHI",
+      "position": "RB",
+      "rank": 95,
+      "draftedPercentage": 100,
+      "averageValue": 2.8,
+      "projectedValue": 3
+    },
+    {
+      "name": "RJ Harvey",
+      "nflTeam": "DEN",
+      "position": "RB",
+      "rank": 99,
+      "draftedPercentage": 100,
+      "averageValue": 2.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "George Kittle",
+      "nflTeam": "SF",
+      "position": "TE",
+      "rank": 102,
+      "draftedPercentage": 100,
+      "averageValue": 2.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "Brian Thomas Jr.",
+      "nflTeam": "JAX",
+      "position": "WR",
+      "rank": 65,
+      "draftedPercentage": 100,
+      "averageValue": 2.6,
+      "projectedValue": 5
+    },
+    {
+      "name": "Trevor Lawrence",
+      "nflTeam": "JAX",
+      "position": "QB",
+      "rank": 76,
+      "draftedPercentage": 100,
+      "averageValue": 2.5,
+      "projectedValue": 4
+    },
+    {
+      "name": "Broncos",
+      "nflTeam": "DEN",
+      "position": "DST",
+      "rank": 151,
+      "draftedPercentage": 100,
+      "averageValue": 2.5,
+      "projectedValue": 1
+    },
+    {
+      "name": "DK Metcalf",
+      "nflTeam": "PIT",
+      "position": "WR",
+      "rank": 80,
+      "draftedPercentage": 100,
+      "averageValue": 2.4,
+      "projectedValue": 3
+    },
+    {
+      "name": "J.K. Dobbins",
+      "nflTeam": "DEN",
+      "position": "RB",
+      "rank": 93,
+      "draftedPercentage": 100,
+      "averageValue": 2.4,
+      "projectedValue": 2
+    },
+    {
+      "name": "Patrick Mahomes",
+      "nflTeam": "KC",
+      "position": "QB",
+      "rank": 109,
+      "draftedPercentage": 100,
+      "averageValue": 2.4,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jordyn Tyson",
+      "nflTeam": "NO",
+      "position": "WR",
+      "rank": 81,
+      "draftedPercentage": 100,
+      "averageValue": 2.3,
+      "projectedValue": 4
+    },
+    {
+      "name": "Travis Kelce",
+      "nflTeam": "KC",
+      "position": "TE",
+      "rank": 117,
+      "draftedPercentage": 100,
+      "averageValue": 2.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "Seahawks",
+      "nflTeam": "SEA",
+      "position": "DST",
+      "rank": 153,
+      "draftedPercentage": 100,
+      "averageValue": 2.1,
+      "projectedValue": 1
+    },
+    {
+      "name": "Kenny Gainwell",
+      "nflTeam": "TB",
+      "position": "RB",
+      "rank": 111,
+      "draftedPercentage": 96,
+      "averageValue": 1.9,
+      "projectedValue": 2
+    },
+    {
+      "name": "Zach Charbonnet",
+      "nflTeam": "SEA",
+      "position": "RB",
+      "rank": 143,
+      "draftedPercentage": 41,
+      "averageValue": 1.9,
+      "projectedValue": 1
+    },
+    {
+      "name": "Parker Washington",
+      "nflTeam": "JAX",
+      "position": "WR",
+      "rank": 67,
+      "draftedPercentage": 100,
+      "averageValue": 1.8,
+      "projectedValue": 6
+    },
+    {
+      "name": "Chris Godwin Jr.",
+      "nflTeam": "TB",
+      "position": "WR",
+      "rank": 87,
+      "draftedPercentage": 100,
+      "averageValue": 1.8,
+      "projectedValue": 3
+    },
+    {
+      "name": "Makai Lemon",
+      "nflTeam": "PHI",
+      "position": "WR",
+      "rank": 88,
+      "draftedPercentage": 100,
+      "averageValue": 1.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "Courtland Sutton",
+      "nflTeam": "DEN",
+      "position": "WR",
+      "rank": 94,
+      "draftedPercentage": 100,
+      "averageValue": 1.8,
+      "projectedValue": 3
+    },
+    {
+      "name": "Matthew Stafford",
+      "nflTeam": "LAR",
+      "position": "QB",
+      "rank": 115,
+      "draftedPercentage": 99,
+      "averageValue": 1.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "Aaron Jones Sr.",
+      "nflTeam": "MIN",
+      "position": "RB",
+      "rank": 125,
+      "draftedPercentage": 88,
+      "averageValue": 1.8,
+      "projectedValue": 2
+    },
+    {
+      "name": "Greg Dulcich",
+      "nflTeam": "MIA",
+      "position": "TE",
+      "rank": 184,
+      "draftedPercentage": 2,
+      "averageValue": 1.8,
+      "projectedValue": 1
+    },
+    {
+      "name": "Michael Wilson",
+      "nflTeam": "ARI",
+      "position": "WR",
+      "rank": 103,
+      "draftedPercentage": 98,
+      "averageValue": 1.7,
+      "projectedValue": 2
+    },
+    {
+      "name": "Rachaad White",
+      "nflTeam": "WAS",
+      "position": "RB",
+      "rank": 105,
+      "draftedPercentage": 79,
+      "averageValue": 1.7,
+      "projectedValue": 2
+    },
+    {
+      "name": "Isaiah Likely",
+      "nflTeam": "NYG",
+      "position": "TE",
+      "rank": 113,
+      "draftedPercentage": 99,
+      "averageValue": 1.7,
+      "projectedValue": 2
+    },
+    {
+      "name": "Ka'imi Fairbairn",
+      "nflTeam": "HOU",
+      "position": "K",
+      "rank": 182,
+      "draftedPercentage": 100,
+      "averageValue": 1.7,
+      "projectedValue": 1
+    },
+    {
+      "name": "Jordan Mason",
+      "nflTeam": "MIN",
+      "position": "RB",
+      "rank": 104,
+      "draftedPercentage": 75,
+      "averageValue": 1.6,
+      "projectedValue": 2
+    },
+    {
+      "name": "Stefon Diggs",
+      "nflTeam": "NE",
+      "position": "WR",
+      "rank": 126,
+      "draftedPercentage": 27,
+      "averageValue": 1.6,
+      "projectedValue": 1
+    },
+    {
+      "name": "Cameron Dicker",
+      "nflTeam": "LAC",
+      "position": "K",
+      "rank": 178,
+      "draftedPercentage": 100,
+      "averageValue": 1.6,
+      "projectedValue": 1
+    },
+    {
+      "name": "Jacory Croskey-Merritt",
+      "nflTeam": "WAS",
+      "position": "RB",
+      "rank": 112,
+      "draftedPercentage": 91,
+      "averageValue": 1.5,
+      "projectedValue": 2
+    },
+    {
+      "name": "Cam Little",
+      "nflTeam": "JAX",
+      "position": "K",
+      "rank": 180,
+      "draftedPercentage": 100,
+      "averageValue": 1.5,
+      "projectedValue": 1
+    },
+    {
+      "name": "Tyreek Hill",
+      "nflTeam": "MIA",
+      "position": "WR",
+      "rank": 234,
+      "draftedPercentage": 8,
+      "averageValue": 1.5,
+      "projectedValue": 1
+    },
+    {
+      "name": "Brock Purdy",
+      "nflTeam": "SF",
+      "position": "QB",
+      "rank": 91,
+      "draftedPercentage": 99,
+      "averageValue": 1.4,
+      "projectedValue": 3
+    },
+    {
+      "name": "Bo Nix",
+      "nflTeam": "DEN",
+      "position": "QB",
+      "rank": 101,
+      "draftedPercentage": 99,
+      "averageValue": 1.4,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jared Goff",
+      "nflTeam": "DET",
+      "position": "QB",
+      "rank": 120,
+      "draftedPercentage": 92,
+      "averageValue": 1.4,
+      "projectedValue": 2
+    },
+    {
+      "name": "Cam Ward",
+      "nflTeam": "TEN",
+      "position": "QB",
+      "rank": 175,
+      "draftedPercentage": 3,
+      "averageValue": 1.4,
+      "projectedValue": 1
+    },
+    {
+      "name": "Deebo Samuel",
+      "nflTeam": "SF",
+      "position": "WR",
+      "rank": 191,
+      "draftedPercentage": 4,
+      "averageValue": 1.4,
+      "projectedValue": 1
+    },
+    {
+      "name": "Packers",
+      "nflTeam": "GB",
+      "position": "DST",
+      "rank": 217,
+      "draftedPercentage": 21,
+      "averageValue": 1.4,
+      "projectedValue": 1
+    },
+    {
+      "name": "Chase McLaughlin",
+      "nflTeam": "TB",
+      "position": "K",
+      "rank": 239,
+      "draftedPercentage": 13,
+      "averageValue": 1.4,
+      "projectedValue": 0
+    },
+    {
+      "name": "49ers",
+      "nflTeam": "SF",
+      "position": "DST",
+      "rank": 258,
+      "draftedPercentage": 8,
+      "averageValue": 1.4,
+      "projectedValue": 0
+    },
+    {
+      "name": "David Njoku",
+      "nflTeam": "LAC",
+      "position": "TE",
+      "rank": 315,
+      "draftedPercentage": 3,
+      "averageValue": 1.4,
+      "projectedValue": 1
+    },
+    {
+      "name": "Quentin Johnston",
+      "nflTeam": "LAC",
+      "position": "WR",
+      "rank": 86,
+      "draftedPercentage": 86,
+      "averageValue": 1.3,
+      "projectedValue": 3
+    },
+    {
+      "name": "Ricky Pearsall",
+      "nflTeam": "SF",
+      "position": "WR",
+      "rank": 89,
+      "draftedPercentage": 99,
+      "averageValue": 1.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "Kyler Murray",
+      "nflTeam": "MIN",
+      "position": "QB",
+      "rank": 106,
+      "draftedPercentage": 96,
+      "averageValue": 1.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "Dalton Kincaid",
+      "nflTeam": "BUF",
+      "position": "TE",
+      "rank": 107,
+      "draftedPercentage": 100,
+      "averageValue": 1.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "Dallas Goedert",
+      "nflTeam": "PHI",
+      "position": "TE",
+      "rank": 114,
+      "draftedPercentage": 99,
+      "averageValue": 1.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "KC Concepcion",
+      "nflTeam": "CLE",
+      "position": "WR",
+      "rank": 124,
+      "draftedPercentage": 26,
+      "averageValue": 1.3,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jake Ferguson",
+      "nflTeam": "DAL",
+      "position": "TE",
+      "rank": 136,
+      "draftedPercentage": 98,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Bryce Young",
+      "nflTeam": "CAR",
+      "position": "QB",
+      "rank": 162,
+      "draftedPercentage": 2,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Jason Myers",
+      "nflTeam": "SEA",
+      "position": "K",
+      "rank": 186,
+      "draftedPercentage": 100,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Chiefs",
+      "nflTeam": "KC",
+      "position": "DST",
+      "rank": 202,
+      "draftedPercentage": 9,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Jake Bates",
+      "nflTeam": "DET",
+      "position": "K",
+      "rank": 216,
+      "draftedPercentage": 34,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Will Reichard",
+      "nflTeam": "MIN",
+      "position": "K",
+      "rank": 224,
+      "draftedPercentage": 11,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Lions",
+      "nflTeam": "DET",
+      "position": "DST",
+      "rank": 229,
+      "draftedPercentage": 30,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Bills",
+      "nflTeam": "BUF",
+      "position": "DST",
+      "rank": 230,
+      "draftedPercentage": 11,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Giants",
+      "nflTeam": "NYG",
+      "position": "DST",
+      "rank": 245,
+      "draftedPercentage": 3,
+      "averageValue": 1.3,
+      "projectedValue": 0
+    },
+    {
+      "name": "Harrison Mevis",
+      "nflTeam": "LAR",
+      "position": "K",
+      "rank": 249,
+      "draftedPercentage": 37,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Pat Freiermuth",
+      "nflTeam": "PIT",
+      "position": "TE",
+      "rank": 294,
+      "draftedPercentage": 2,
+      "averageValue": 1.3,
+      "projectedValue": 1
+    },
+    {
+      "name": "Josh Downs",
+      "nflTeam": "IND",
+      "position": "WR",
+      "rank": 98,
+      "draftedPercentage": 91,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Michael Pittman Jr.",
+      "nflTeam": "PIT",
+      "position": "WR",
+      "rank": 108,
+      "draftedPercentage": 94,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jakobi Meyers",
+      "nflTeam": "JAX",
+      "position": "WR",
+      "rank": 116,
+      "draftedPercentage": 81,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Matthew Golden",
+      "nflTeam": "GB",
+      "position": "WR",
+      "rank": 118,
+      "draftedPercentage": 30,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Mark Andrews",
+      "nflTeam": "BAL",
+      "position": "TE",
+      "rank": 119,
+      "draftedPercentage": 98,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Chris Rodriguez Jr.",
+      "nflTeam": "JAX",
+      "position": "RB",
+      "rank": 121,
+      "draftedPercentage": 29,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Tyrone Tracy Jr.",
+      "nflTeam": "NYG",
+      "position": "RB",
+      "rank": 128,
+      "draftedPercentage": 26,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Jordan Love",
+      "nflTeam": "GB",
+      "position": "QB",
+      "rank": 129,
+      "draftedPercentage": 60,
+      "averageValue": 1.2,
+      "projectedValue": 2
+    },
+    {
+      "name": "Tyler Shough",
+      "nflTeam": "NO",
+      "position": "QB",
+      "rank": 133,
+      "draftedPercentage": 33,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Tank Bigsby",
+      "nflTeam": "PHI",
+      "position": "RB",
+      "rank": 141,
+      "draftedPercentage": 4,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Alvin Kamara",
+      "nflTeam": "NO",
+      "position": "RB",
+      "rank": 149,
+      "draftedPercentage": 19,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "C.J. Stroud",
+      "nflTeam": "HOU",
+      "position": "QB",
+      "rank": 161,
+      "draftedPercentage": 9,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Sam Darnold",
+      "nflTeam": "SEA",
+      "position": "QB",
+      "rank": 165,
+      "draftedPercentage": 13,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Mike Washington Jr.",
+      "nflTeam": "LV",
+      "position": "RB",
+      "rank": 170,
+      "draftedPercentage": 2,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Eagles",
+      "nflTeam": "PHI",
+      "position": "DST",
+      "rank": 173,
+      "draftedPercentage": 100,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Steelers",
+      "nflTeam": "PIT",
+      "position": "DST",
+      "rank": 176,
+      "draftedPercentage": 81,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Chargers",
+      "nflTeam": "LAC",
+      "position": "DST",
+      "rank": 189,
+      "draftedPercentage": 72,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Ravens",
+      "nflTeam": "BAL",
+      "position": "DST",
+      "rank": 190,
+      "draftedPercentage": 41,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "AJ Barner",
+      "nflTeam": "SEA",
+      "position": "TE",
+      "rank": 200,
+      "draftedPercentage": 4,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Chris Boswell",
+      "nflTeam": "PIT",
+      "position": "K",
+      "rank": 226,
+      "draftedPercentage": 42,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Terrance Ferguson",
+      "nflTeam": "LAR",
+      "position": "TE",
+      "rank": 232,
+      "draftedPercentage": 2,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Dalton Schultz",
+      "nflTeam": "HOU",
+      "position": "TE",
+      "rank": 243,
+      "draftedPercentage": 4,
+      "averageValue": 1.2,
+      "projectedValue": 1
+    },
+    {
+      "name": "Aaron Rodgers",
+      "nflTeam": "PIT",
+      "position": "QB",
+      "rank": 269,
+      "draftedPercentage": 2,
+      "averageValue": 1.2,
+      "projectedValue": 0
+    },
+    {
+      "name": "Jayden Reed",
+      "nflTeam": "GB",
+      "position": "WR",
+      "rank": 96,
+      "draftedPercentage": 91,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jordan Addison",
+      "nflTeam": "MIN",
+      "position": "WR",
+      "rank": 97,
+      "draftedPercentage": 93,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Romeo Doubs",
+      "nflTeam": "NE",
+      "position": "WR",
+      "rank": 122,
+      "draftedPercentage": 34,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jayden Higgins",
+      "nflTeam": "HOU",
+      "position": "WR",
+      "rank": 123,
+      "draftedPercentage": 19,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Jalen Coker",
+      "nflTeam": "CAR",
+      "position": "WR",
+      "rank": 127,
+      "draftedPercentage": 6,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Wan'Dale Robinson",
+      "nflTeam": "TEN",
+      "position": "WR",
+      "rank": 130,
+      "draftedPercentage": 48,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Malik Willis",
+      "nflTeam": "MIA",
+      "position": "QB",
+      "rank": 131,
+      "draftedPercentage": 47,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Baker Mayfield",
+      "nflTeam": "TB",
+      "position": "QB",
+      "rank": 132,
+      "draftedPercentage": 41,
+      "averageValue": 1.1,
+      "projectedValue": 2
+    },
+    {
+      "name": "Keaton Mitchell",
+      "nflTeam": "LAC",
+      "position": "RB",
+      "rank": 134,
+      "draftedPercentage": 6,
+      "averageValue": 1.1,
+      "projectedValue": 1
+    },
+    {
+      "name": "Tyler Allgeier",
+      "nflTeam": "ARI",
+      "position": "RB",
+      "rank": 135,
+      "draftedPercentage": 35,
+      "averageValue": 1.1,
+      "projectedValue": 1
+    },
+    {
+      "name": "Rashid Shaheed",
+      "nflTeam": "SEA",
+      "position": "WR",
+      "rank": 137,
+      "draftedPercentage": 11,
+      "averageValue": 1.1,
+      "projectedValue": 1
+    },
+    {
+      "name": "Chig Okonkwo",
+      "nflTeam": "WAS",
+      "position": "TE",
+      "rank": 138,
+      "draftedPercentage": 37,
+      "averageValue": 1.1,
+      "projectedValue": 1
+    },
+    {
+      "name": "Tyjae Spears",
+      "nflTeam": "TEN",
+      "position": "RB",
+      "rank": 139,
+      "draftedPercentage": 5,
+      "averageValue": 1.1,
+      "projectedValue": 1
+    }
+  ]
+}

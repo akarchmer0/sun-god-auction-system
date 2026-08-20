@@ -1,3 +1,5 @@
+import { nextLegalBidAmount } from "./domain.mjs";
+
 export const VISUAL_BID_WINDOW_MS = 300;
 export const VISION_SCAN_PROFILES = Object.freeze({
   normal: Object.freeze({ key: "normal", width: 640, fps: 8 }),
@@ -20,7 +22,7 @@ export function markerIdForTeam(teams, teamId) {
 }
 
 export function nextVisualBidAmount(state) {
-  return Math.max(1, state.auction.amount + state.config.increment);
+  return nextLegalBidAmount(state);
 }
 
 export function classifyVisualBidBatch(teamIds) {

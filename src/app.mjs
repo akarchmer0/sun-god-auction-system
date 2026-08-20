@@ -1,4 +1,5 @@
-import { seedPlayers, makeTeams, parseTeamSetupLines } from "./data.mjs";
+import { makeTeams, parseTeamSetupLines } from "./data.mjs";
+import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import {
   AUCTIONEER_SPEED_OPTIONS,
@@ -14,7 +15,7 @@ import {
   patterDelayMs
 } from "./auctioneer-patter.mjs";
 import { shouldRoastSale } from "./roast-engine.mjs";
-import { classifyPhoneBidBatch } from "./phone-bidding.mjs";
+import { buildPhoneAuctionHistory, classifyPhoneBidBatch } from "./phone-bidding.mjs";
 import { LanRoomTransport, RelayRoomTransport } from "./room-transports.mjs";
 import { validateDraftState } from "./draft-state-validation.mjs";
 import {
@@ -41,6 +42,7 @@ import {
   correctSale,
   currentPlayer,
   maxBidForTeam,
+  nextLegalBidAmount,
   currentNominator,
   canTeamRosterPlayer,
   ROSTER_POSITIONS,
@@ -65,23 +67,21 @@ const PHONE_ROOM_HOST_KEY_STORAGE_KEY = "sun-god-phone-room-host-key";
 const AUCTIONEER_PROFILE_STORAGE_KEY = "sun-god-auctioneer-profile-v1";
 const PERSONAL_SETUP_STORAGE_KEY = "sun-god-personal-setup-v1";
 const SPEECH_PRIORITY = { patter: 20, nomination: 30, countdown: 50, bid: 100, roast: 105, sold: 110, ruling: 120, preflight: 130 };
-const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 };
+const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
 const hostToken = await loadHostSession();
 const restoredRelaySession = await globalThis.sunGod?.relaySession?.get?.();
 const durableDraft = await loadDurableDraft();
 const legacyDraft = restoreDraft();
+const restoredDraftState = withoutMarketValues(restoreDraft(durableDraft.state) || legacyDraft);
+const replacedFictionalPlayers = hasFictionalPlayers(restoredDraftState);
 let draftRevision = durableDraft.revision || 0;
 let draftSavePromise = Promise.resolve();
 let durableSaveFailed = false;
 let emergencyLocked = false;
-let state = restoreDraft(durableDraft.state) || legacyDraft || createDraft({
-  players: seedPlayers,
-  teams: makeTeams(),
-  budget: 200,
-  rosterSize: 15,
-  rosterRequirements: STANDARD_ROSTER_REQUIREMENTS
-});
+let state = restoredDraftState && !replacedFictionalPlayers
+  ? restoredDraftState
+  : createFantasyProsDraft(restoredDraftState);
 let auctioneerProfile = restoreAuctioneerProfile();
 let voiceEnabled = auctioneerProfile.enabled;
 let recentRoasts = [];
@@ -98,7 +98,9 @@ let patterQueueKey = "";
 let patterRequest = null;
 let patterRequestSequence = 0;
 let recentPatterLines = [];
-let notice = null;
+let notice = replacedFictionalPlayers
+  ? { kind: "success", message: `Replaced the fictional player pool with ${fantasyProsPlayers.length} FantasyPros CSV players and values.` }
+  : null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
 let phoneRoomTransport = null;
@@ -149,7 +151,7 @@ wireGlobalEvents();
 if (globalThis.sunGod?.isDesktop && localStorage.getItem(PERSONAL_SETUP_STORAGE_KEY) !== "complete") {
   window.setTimeout(() => document.querySelector("#onboarding-dialog")?.showModal(), 0);
 }
-if (!durableDraft.state) persistDraft();
+if (!durableDraft.state || replacedFictionalPlayers) persistDraft();
 void auctioneerVoice.initialize(auctioneerProfile.provider);
 void initializeBiddingRoom();
 if (state.auction.phase === "ready") void prepareAutoIntents();
@@ -167,7 +169,7 @@ function render() {
   const nextPlayers = state.queue
     .map((id) => state.players.find((item) => item.id === id))
     .filter((item) => item?.status === "available" && item.id !== player?.id)
-    .slice(0, 7);
+    .slice(0, 5);
 
   app.innerHTML = `
     <div class="shell">
@@ -199,88 +201,81 @@ function render() {
       ${pendingVisualTie ? visualTieConfirmation() : ""}
 
       <main class="draft-grid">
-        <section id="phone-room-panel" class="phone-room-panel panel">
-          <div class="panel-heading">
-            <div><span class="eyebrow">${phoneRoom.mode === "remote" ? "REMOTE BIDDING" : "LOCAL PHONE BIDDING"}</span><h2>Draft room</h2></div>
-            <span class="phone-room-status ${phoneRoom.status === "live" ? "is-live" : ""}"><i></i>${phoneRoomStatusLabel()}</span>
-          </div>
-          <div class="phone-join-card">
-            <div class="phone-qr">${phoneRoom.joinUrl ? qrCodeSvg(phoneRoom.joinUrl) : `<span>${icon("phone")}</span>`}</div>
-            <div class="phone-join-copy">
-              <small>ROOM CODE</small>
-              <strong>${escapeHtml(phoneRoom.roomId)}</strong>
-              <p>${phoneRoom.joinUrl ? phoneRoom.mode === "remote" ? "Local and remote phones use this relay link for fair timestamps." : "Scan to join on the same Wi-Fi." : "Preparing the phone room…"}</p>
-              <span title="${escapeHtml(phoneRoom.joinUrl)}">${escapeHtml(phoneRoom.joinUrl || "Finding this Mac’s network address…")}</span>
+        <div class="draft-column draft-column-left">
+          <section id="phone-room-panel" class="phone-room-panel panel">
+            <div class="panel-heading">
+              <div><span class="eyebrow">${phoneRoom.mode === "remote" ? "REMOTE BIDDING" : "LOCAL PHONE BIDDING"}</span><h2>Draft room</h2></div>
+              <span class="phone-room-status ${phoneRoom.status === "live" ? "is-live" : ""}"><i></i>${phoneRoomStatusLabel()}</span>
             </div>
-          </div>
-          <div class="phone-room-actions">
-            <button data-action="toggle-bidding-mode">${phoneRoom.mode === "remote" ? "Switch to local-only" : "Enable remote bidders"}</button>
-            <button data-action="phone-preflight">Run preflight</button>
-            <button data-action="copy-phone-link" ${phoneRoom.joinUrl ? "" : "disabled"}>${icon("copy")} Copy join link</button>
-            <button data-action="reset-phone-claims" ${phoneRoom.mode === "remote" || !phoneRoom.claimedTeamIds.length ? "disabled" : ""}>Reset phones</button>
-          </div>
-          ${phoneRoom.error ? `<p class="phone-room-error" role="alert">${escapeHtml(phoneRoom.error)}</p>` : ""}
-          <div class="phone-claim-summary"><span>PARTICIPANTS</span><strong>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} joined</strong></div>
-          <div class="phone-claim-grid">
-            ${state.teams.map((team) => {
-              const joined = phoneRoom.claimedTeamIds.includes(team.id);
-              const automatic = isAutoTeam(team);
-              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${automatic ? "AUTO DRAFT" : joined ? "PHONE READY" : "WAITING"}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
-            }).join("")}
-          </div>
-          <p class="camera-note">${phoneRoom.mode === "remote" ? `Room audio uses your league call. ${phoneRoom.latencyMs == null ? "Measuring relay latency…" : `Relay round trip: ${phoneRoom.latencyMs} ms.`}` : "Human managers scan once and choose their team."} Auto teams bid locally within league rules.</p>
-        </section>
+            <div class="phone-join-card">
+              <div class="phone-qr">${phoneRoom.joinUrl ? qrCodeSvg(phoneRoom.joinUrl) : `<span>${icon("phone")}</span>`}</div>
+              <div class="phone-join-copy">
+                <small>ROOM CODE</small>
+                <strong>${escapeHtml(phoneRoom.roomId)}</strong>
+                <p>${phoneRoom.joinUrl ? phoneRoom.mode === "remote" ? "Local and remote phones use this relay link." : "Scan to join on the same Wi-Fi." : "Preparing the phone room…"}</p>
+                <span title="${escapeHtml(phoneRoom.joinUrl)}">${escapeHtml(phoneRoom.joinUrl || "Finding this Mac’s network address…")}</span>
+              </div>
+            </div>
+            <div class="phone-room-actions">
+              <button data-action="toggle-bidding-mode">${phoneRoom.mode === "remote" ? "Local only" : "Remote bidders"}</button>
+              <button data-action="phone-preflight">Preflight</button>
+              <button data-action="copy-phone-link" ${phoneRoom.joinUrl ? "" : "disabled"}>${icon("copy")} Copy link</button>
+              <button data-action="reset-phone-claims" ${phoneRoom.mode === "remote" || !phoneRoom.claimedTeamIds.length ? "disabled" : ""}>Reset</button>
+            </div>
+            ${phoneRoom.error ? `<p class="phone-room-error" role="alert">${escapeHtml(phoneRoom.error)}</p>` : ""}
+          </section>
+
+          <aside class="queue-panel panel">
+            <div class="panel-heading">
+              <div><span class="eyebrow">PLAYER POOL</span><h2>Nominate next</h2><span class="nomination-chip">${escapeHtml(nextNominator?.manager || "Commissioner")} is up</span></div>
+              <label class="search-box">${icon("search")}<input id="player-search" placeholder="Find player" autocomplete="off" /></label>
+            </div>
+            <div id="search-results" class="search-results"></div>
+            <div class="queue-list">
+              ${nextPlayers.length ? nextPlayers.map((item, index) => queueRow(item, index)).join("") : `<p class="empty-copy">No players left in the queue.</p>`}
+            </div>
+            <div class="queue-actions">
+              <button class="fantasy-pros-button" data-action="load-fantasy-pros" title="Replace the current draft with the supplied FantasyPros CSV players and auction values">
+                ${icon("database")}
+                <span><strong>Reload player values</strong><small>${fantasyProsPlayers.length} players · resets draft</small></span>
+                ${icon("arrow")}
+              </button>
+              <button class="text-button csv-import-button" data-action="import">${icon("upload")} Import CSV</button>
+              <a class="text-button csv-import-button" href="/assets/player-template.csv" download>CSV template</a>
+              <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
+            </div>
+          </aside>
+        </div>
 
         <section class="auction-stage">
           <div class="stage-glow"></div>
           ${player ? playerCard(player, highBidder, lotNominator) : emptyStage(nextNominator)}
         </section>
 
-        <aside class="queue-panel panel">
-          <div class="panel-heading">
-            <div><span class="eyebrow">ON DECK</span><h2>Player board</h2><span class="nomination-chip">${escapeHtml(nextNominator?.manager || "Commissioner")} is up</span></div>
-            <label class="search-box">${icon("search")}<input id="player-search" placeholder="Find player" autocomplete="off" /></label>
-          </div>
-          <div id="search-results" class="search-results"></div>
-          <div class="queue-list">
-            ${nextPlayers.length ? nextPlayers.map((item, index) => queueRow(item, index)).join("") : `<p class="empty-copy">No players left in the queue.</p>`}
-          </div>
-          <div class="queue-actions">
-            <button class="demo-data-button" data-action="load-demo-data" title="Replace the current draft with fictional demo players">
-              ${icon("database")}
-              <span><strong>Reload fictional demo players</strong><small>${seedPlayers.length} players · resets draft</small></span>
-              ${icon("arrow")}
-            </button>
-            <button class="text-button csv-import-button" data-action="import">${icon("upload")} Or import player CSV</button>
-            <a class="text-button csv-import-button" href="/assets/player-template.csv" download>Download CSV template</a>
-            <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
-          </div>
-        </aside>
-
-        <section class="bidding-panel panel">
-          <div class="bidder-heading">
-            <div><span class="eyebrow">BIDDER CONSOLE</span><h2>Who has the bid?</h2></div>
-            <div class="manual-bid">
-              <label for="manual-amount">Next bid</label>
-              <span>$</span><input id="manual-amount" type="number" min="1" value="${Math.max(1, state.auction.amount + state.config.increment)}" />
-            </div>
-          </div>
-          <div class="team-grid">
-            ${state.teams.map((team, index) => teamBidButton(team, index)).join("")}
-          </div>
-          <div class="keyboard-hint"><kbd>1</kbd>–<kbd>${Math.min(9, state.teams.length)}</kbd> quick bid <span>•</span> Joined phones bid directly for their selected manager</div>
-        </section>
-
         <aside class="ledger-panel panel">
           <div class="panel-heading">
-            <div><span class="eyebrow">DRAFT LEDGER</span><h2>Recent sales</h2></div>
+            <div><span class="eyebrow">DRAFT LEDGER</span><h2>Auction history</h2></div>
             <div class="ledger-tools"><button class="text-button" data-action="export-backup">Backup</button><button class="text-button" data-action="import-backup">Restore</button><button class="text-button" data-action="undo" ${state.sales.length ? "" : "disabled"}>Undo last</button><input id="backup-input" type="file" accept="application/json,.json" hidden /></div>
           </div>
           <div class="sales-list">
-            ${state.sales.length ? [...state.sales].reverse().slice(0, 5).map(saleRow).join("") : `<p class="empty-copy">Every completed sale will appear here.</p>`}
+            ${state.sales.length ? [...state.sales].reverse().map(saleRow).join("") : `<p class="empty-copy">Every completed sale will appear here.</p>`}
           </div>
           <button class="draft-results-button" data-action="results">${icon("trophy")}<span><strong>View & export results</strong><small>Summary · CSV · ESPN · Yahoo · Sleeper</small></span>${icon("arrow")}</button>
         </aside>
+
+        <section class="participants-panel panel">
+          <div class="participants-heading">
+            <div><span class="eyebrow">PARTICIPANTS</span><h2>Managers</h2></div>
+            <strong class="participants-count">${phoneRoom.claimedTeamIds.length}/${humanTeamCount}</strong>
+          </div>
+          <div class="phone-claim-grid">
+            ${state.teams.map((team) => {
+              const joined = phoneRoom.claimedTeamIds.includes(team.id);
+              const automatic = isAutoTeam(team);
+              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""}" title="${escapeHtml(team.name)} · ${automatic ? "Auto draft" : joined ? "Phone ready" : "Waiting for phone"}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${automatic ? "AUTO" : joined ? "READY" : "WAIT"}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
+            }).join("")}
+          </div>
+        </section>
       </main>
     </div>
     <dialog id="setup-dialog">${setupDialog()}</dialog>
@@ -325,8 +320,8 @@ function playerCard(player, highBidder, nominator) {
       <h1>${escapeHtml(player.name)}</h1>
       <p>Suggested value <strong>$${player.suggestedValue}</strong></p>
     </div>
-    <div class="bid-display ${state.auction.amount ? "has-bid" : ""}">
-      <span class="bid-label">${state.auction.amount ? "CURRENT BID" : "OPENING BID"}</span>
+    <div class="bid-display ${highBidder ? "has-bid" : ""}">
+      <span class="bid-label">${highBidder ? "CURRENT BID" : "OPENING BID"}</span>
       <div class="bid-number"><sup>$</sup>${state.auction.amount || 1}</div>
       <div class="high-bidder ${highBidder ? "has-leader" : ""}" ${highBidder ? `style="--leader:${highBidder.color}"` : ""}>
         ${highBidder ? `<span class="leader-label">CURRENT WINNING TEAM</span><i></i><span class="leader-copy"><strong>${escapeHtml(highBidder.name)}</strong><small>Managed by ${escapeHtml(highBidder.manager)}</small></span>` : `<span class="waiting-copy">Waiting for the room</span>`}
@@ -355,28 +350,6 @@ function queueRow(player, index) {
     <span class="queue-name"><strong>${escapeHtml(player.name)}</strong><small>${player.nflTeam}</small></span>
     <span class="queue-value">$${player.suggestedValue}</span>
     ${icon("chevron")}
-  </button>`;
-}
-
-function teamBidButton(team, index) {
-  const isHigh = team.id === state.auction.highBidderId;
-  const maxBid = maxBidForTeam(state, team.id);
-  const phoneJoined = phoneRoom.claimedTeamIds.includes(team.id);
-  const automatic = isAutoTeam(team);
-  const autoDecision = state.auction.autoIntents?.[team.id];
-  const autoLabel = state.auction.autoIntentStatus === "pending"
-    ? "AUTO · THINKING"
-    : autoDecision?.intent ? `AUTO · ${autoDecision.intent.toUpperCase()}` : "AUTO";
-  const legalRosterFit = !state.auction.playerId || canTeamRosterPlayer(state, team.id, state.auction.playerId);
-  const disabled = !["open", "once", "twice"].includes(state.auction.phase) || isHigh || !legalRosterFit || maxBid < Math.max(1, state.auction.amount + state.config.increment);
-  const title = !legalRosterFit ? "This player would prevent the team from completing its required positions." : "";
-  return `<button class="team-bid ${isHigh ? "is-high" : ""}" style="--team:${team.color}" data-action="bid" data-team-id="${team.id}" title="${escapeHtml(title)}" ${disabled ? "disabled" : ""}>
-    <span class="team-key" title="Keyboard shortcut ${index < 9 ? index + 1 : "unassigned"}">${index < 9 ? index + 1 : ""}</span>
-    <span class="team-swatch"></span>
-    <span class="team-copy"><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(team.manager)} · ${team.roster.length}/${state.config.rosterSize} players</small></span>
-    <span class="team-money"><strong>$${team.budget}</strong><small>max $${maxBid}</small></span>
-    <span class="armed-label">${isHigh ? "HIGH BID" : "+ BID"}</span>
-    <span class="phone-bid-badge ${automatic ? "is-auto" : ""}" title="${automatic ? escapeHtml(autoDecision ? `${autoDecision.provider === "openai" ? "AI" : "Local"} strategy: ${autoDecision.reason.replaceAll("_", " ")}` : "AI strategy with local rules-based bidding") : phoneJoined ? "Phone connected" : "Waiting for phone"}">${automatic ? autoLabel : phoneJoined ? "PHONE READY" : "NO PHONE"}</span>
   </button>`;
 }
 
@@ -600,7 +573,6 @@ function wireGlobalEvents() {
       if (action === "pause") { clearTimer(); clearAutoDraftTimer(); stopAuctioneer(); return update(pauseAuction(state)); }
       if (action === "advance") return runCountdownStep(true);
       if (action === "next") return await selectNextQueuedPlayer();
-      if (action === "bid") return submitBid(button.dataset.teamId);
       if (action === "undo") {
         clearTimer();
         clearAutoDraftTimer();
@@ -610,7 +582,7 @@ function wireGlobalEvents() {
       if (action === "results") return await openResultsPage();
       if (action === "export-backup") return exportDraftBackup();
       if (action === "import-backup") return document.querySelector("#backup-input")?.click();
-      if (action === "load-demo-data") return loadDemoPreset();
+      if (action === "load-fantasy-pros") return loadFantasyProsPreset();
       if (action === "import") return document.querySelector("#csv-input")?.click();
     } catch (error) {
       showNotice({ kind: "error", message: error.message });
@@ -924,7 +896,7 @@ function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
   persistDraft();
   render();
   const team = state.teams.find((item) => item.id === teamId);
-  const next = state.auction.amount + state.config.increment;
+  const next = nextLegalBidAmount(state);
   speak(auctioneerScript.bid({ amount: state.auction.amount, manager: team.manager, nextAmount: next, source }), null, {
     style: "bid",
     priority: SPEECH_PRIORITY.bid,
@@ -1010,7 +982,7 @@ function speakPatter() {
   const player = currentPlayer(state);
   if (!player) return;
   const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
-  const nextAmount = Math.max(1, state.auction.amount + state.config.increment);
+  const nextAmount = nextLegalBidAmount(state);
   const key = currentPatterKey();
   if (patterQueueKey !== key) {
     patterQueue = [];
@@ -1094,7 +1066,7 @@ function livePatterContext() {
     position: player?.position,
     nflTeam: player?.nflTeam,
     amount: state.auction.amount,
-    nextAmount: Math.max(1, state.auction.amount + state.config.increment),
+    nextAmount: nextLegalBidAmount(state),
     suggestedValue: player?.suggestedValue,
     highBidderManager: highBidder?.manager,
     highBidderTeam: highBidder?.name,
@@ -1553,6 +1525,7 @@ async function syncPhoneRoomState() {
     const publicRoom = {
       roomId: phoneRoom.roomId,
       meetingLink: phoneRoom.mode === "remote" ? phoneRoom.meetingLink : "",
+      history: buildPhoneAuctionHistory(state),
       auction: {
         phase: state.auction.phase,
         amount: state.auction.amount,
@@ -1633,27 +1606,45 @@ async function openResultsPage() {
   window.location.assign(`./results.html#${encoded}`);
 }
 
-function loadDemoPreset() {
+function loadFantasyProsPreset() {
   clearTimer();
   clearAutoDraftTimer();
   stopAuctioneer();
   clearVisualBidWindow();
   pendingVisualTie = null;
-  state = createDraft({
-    players: seedPlayers,
-    teams: state.teams.map((team) => ({ ...team, roster: [] })),
-    budget: state.config.budget,
-    rosterSize: state.config.rosterSize,
-    increment: state.config.increment,
-    rosterRequirements: normalizedRequirements(),
-    countdownOnceSeconds: state.config.countdownOnceSeconds,
-    countdownTwiceSeconds: state.config.countdownTwiceSeconds,
-    nominationOrder: state.nomination?.order
-  });
+  state = createFantasyProsDraft(state);
   persistDraft();
   render();
   scheduleAutoNomination();
-  showNotice({ kind: "success", message: `Loaded ${seedPlayers.length} fictional demo players. The draft is ready.` });
+  showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} FantasyPros CSV players and values. The draft is ready.` });
+}
+
+function createFantasyProsDraft(baseState = null) {
+  const config = baseState?.config || {};
+  const teams = baseState?.teams?.length ? baseState.teams : makeTeams();
+  return createDraft({
+    players: fantasyProsPlayers,
+    teams: teams.map((team) => ({ ...team, roster: [] })),
+    budget: config.budget ?? 200,
+    rosterSize: config.rosterSize ?? 15,
+    increment: config.increment ?? 1,
+    rosterRequirements: config.rosterRequirements || STANDARD_ROSTER_REQUIREMENTS,
+    countdownOnceSeconds: config.countdownOnceSeconds,
+    countdownTwiceSeconds: config.countdownTwiceSeconds,
+    nominationOrder: baseState?.nomination?.order
+  });
+}
+
+function hasFictionalPlayers(draft) {
+  return Boolean(draft?.players?.some((player) => String(player?.id || "").startsWith("demo-")));
+}
+
+function withoutMarketValues(draft) {
+  if (!draft?.players) return draft;
+  return {
+    ...draft,
+    players: draft.players.map(({ marketAverage, marketProjected, marketDraftedPercentage, marketSource, ...player }) => player)
+  };
 }
 
 function update(nextState, message) {

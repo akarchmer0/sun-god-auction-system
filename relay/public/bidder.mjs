@@ -21,6 +21,8 @@ let releaseInFlight = false;
 let sendingBid = false;
 let roomTransport = null;
 let activePhoneTab = "auction";
+let viewedRosterTeamId = selectedTeamId;
+let rosterPickerOpen = false;
 
 localStorage.setItem(TOKEN_KEY, participantToken);
 render();
@@ -48,7 +50,17 @@ function wireEvents() {
       if (button.dataset.action === "claim") return await claimTeam(button.dataset.teamId);
       if (button.dataset.action === "bid") return await placePhoneBid(button.dataset.amount == null ? null : Number(button.dataset.amount));
       if (button.dataset.action === "show-tab") {
-        activePhoneTab = button.dataset.tab === "roster" ? "roster" : "auction";
+        activePhoneTab = ["roster", "history"].includes(button.dataset.tab) ? button.dataset.tab : "auction";
+        if (activePhoneTab === "roster" && !viewedRosterTeamId) viewedRosterTeamId = selectedTeamId;
+        if (activePhoneTab !== "roster") rosterPickerOpen = false;
+        render();
+        return;
+      }
+      if (button.dataset.action === "toggle-roster-picker") { rosterPickerOpen = !rosterPickerOpen; render(); return; }
+      if (button.dataset.action === "view-roster") {
+        if (room?.teams?.some((item) => item.id === button.dataset.teamId)) viewedRosterTeamId = button.dataset.teamId;
+        rosterPickerOpen = false;
+        activePhoneTab = "roster";
         render();
         return;
       }
@@ -123,6 +135,8 @@ function handleRelayMessage(payload) {
     if (claimAuthenticated && selectedTeamId && !claimedTeamIds.includes(selectedTeamId) && !releaseInFlight) {
       localStorage.removeItem(teamStorageKey(roomId));
       selectedTeamId = null;
+      viewedRosterTeamId = null;
+      rosterPickerOpen = false;
       claimAuthenticated = false;
       message = "The commissioner reset the connected phones. Choose your team again.";
     }
@@ -183,6 +197,8 @@ async function restoreSelectedTeam() {
   } catch (error) {
     localStorage.removeItem(teamStorageKey(roomId));
     selectedTeamId = null;
+    viewedRosterTeamId = null;
+    rosterPickerOpen = false;
     claimAuthenticated = false;
     status = "choose";
     message = error.message;
@@ -200,6 +216,8 @@ async function claimTeam(teamId, { restoring = false } = {}) {
   }
   await roomTransport.claimTeam({ teamId, participantToken });
   selectedTeamId = teamId;
+  viewedRosterTeamId = teamId;
+  rosterPickerOpen = false;
   claimAuthenticated = true;
   localStorage.setItem(teamStorageKey(roomId), teamId);
   status = "joined";
@@ -214,6 +232,8 @@ async function releaseTeam() {
   try {
     await roomTransport.releaseTeam({ participantToken });
     selectedTeamId = null;
+    viewedRosterTeamId = null;
+    rosterPickerOpen = false;
     claimAuthenticated = false;
     localStorage.removeItem(teamStorageKey(roomId));
     status = "choose";
@@ -286,12 +306,16 @@ function renderBidder() {
   const team = room.teams.find((item) => item.id === selectedTeamId);
   if (!team) {
     selectedTeamId = null;
+    viewedRosterTeamId = null;
+    rosterPickerOpen = false;
     claimAuthenticated = false;
     return renderTeamChoice();
   }
   const auction = room.auction || {};
   const player = auction.player;
+  const highBidder = room.teams.find((item) => item.id === auction.highBidderId);
   const hasHighBid = auction.highBidderId === team.id;
+  const hasAnyBid = Boolean(highBidder);
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
   const hasRosterFit = team.eligibleForPlayer !== false;
   const relayReady = connectionState === "connected" && hostConnected;
@@ -317,11 +341,14 @@ function renderBidder() {
               : !hasRosterFit
                 ? "POSITION SLOTS RESERVED"
                 : `BID $${auction.nextBid}`;
-  const roster = Array.isArray(team.roster) ? team.roster : [];
+  const rosterTeam = room.teams.find((item) => item.id === viewedRosterTeamId) || team;
+  viewedRosterTeamId = rosterTeam.id;
+  const roster = Array.isArray(rosterTeam.roster) ? rosterTeam.roster : [];
+  const history = Array.isArray(room.history) ? room.history : [];
   const auctionTab = `<div class="phone-lot ${player ? "" : "is-empty"}">
       <span class="kicker">${player ? `${escapeHtml(player.position)} · ${escapeHtml(player.nflTeam)}` : "AUCTION ROOM"}</span>
       <h1>${player ? escapeHtml(player.name) : "Waiting for a player"}</h1>
-      <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : "CURRENT BID"}</small><strong><sup>$</sup>${Number(auction.amount || 0)}</strong></div>
+      <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : hasAnyBid ? "CURRENT BID" : "OPENING BID"}</small><strong><sup>$</sup>${Number(auction.amount || 1)}</strong>${highBidder ? `<div class="phone-bid-holder" style="--bid-holder:${highBidder.color}"><i></i><span><small>HELD BY</small><b>${escapeHtml(highBidder.name)}</b></span><em>${escapeHtml(highBidder.manager)}</em></div>` : ""}</div>
       <span class="phone-phase">${escapeHtml(phaseLabel(auction.phase))}</span>
     </div>
     <button class="bid-button ${hasHighBid ? "is-winning" : ""}" data-action="bid" ${canBid ? "" : "disabled"}>${buttonLabel}<small>${canBid ? "Tap once — every bid is confirmed by the host" : escapeHtml(message)}</small></button>
@@ -334,16 +361,24 @@ function renderBidder() {
       </form>
     </section>
     <div class="phone-budget"><span><small>BUDGET</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>ROSTER</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>`;
-  const rosterTab = `<div class="phone-roster-view">
-      <div class="phone-roster-title"><span class="kicker">TEAM BUILDER</span><h1>Your roster</h1><p>${roster.length ? `${roster.length} player${roster.length === 1 ? "" : "s"} drafted` : "Players appear here immediately after they are sold to you."}</p></div>
-      <div class="phone-budget"><span><small>REMAINING</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>PLAYERS</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>
-      <div class="phone-roster-list">${roster.length ? roster.map((rosterPlayer, index) => `<div class="phone-roster-row"><span class="roster-index">${String(index + 1).padStart(2, "0")}</span><span class="roster-position">${escapeHtml(rosterPlayer.position)}</span><span class="roster-player"><strong>${escapeHtml(rosterPlayer.name)}</strong><small>${escapeHtml(rosterPlayer.nflTeam)}</small></span><b>$${Number(rosterPlayer.price || 0)}</b></div>`).join("") : `<div class="phone-roster-empty"><strong>No players yet</strong><span>Your purchases will sync from the auction laptop.</span></div>`}</div>
+  const rosterTab = `<div class="phone-roster-view" style="--roster-team:${rosterTeam.color}">
+      <div class="phone-roster-title">
+        <button class="phone-roster-picker" data-action="toggle-roster-picker" aria-expanded="${rosterPickerOpen}" aria-haspopup="listbox"><i></i><span><small>VIEWING ROSTER</small><strong>${escapeHtml(rosterTeam.name)}</strong><b>${escapeHtml(rosterTeam.manager)}</b></span><em>${rosterPickerOpen ? "CLOSE" : "CHANGE"}<u aria-hidden="true">⌄</u></em></button>
+        ${rosterPickerOpen ? `<div class="phone-roster-menu" role="listbox" aria-label="Choose a team roster">${room.teams.map((rosterOption) => `<button data-action="view-roster" data-team-id="${escapeHtml(rosterOption.id)}" role="option" aria-selected="${rosterOption.id === rosterTeam.id}" class="${rosterOption.id === rosterTeam.id ? "is-selected" : ""}"><i style="background:${rosterOption.color}"></i><span><strong>${escapeHtml(rosterOption.name)}</strong><small>${escapeHtml(rosterOption.manager)}</small></span><b>${Number(rosterOption.rosterCount || 0)}/${Number(rosterOption.rosterSize || 0)}</b></button>`).join("")}</div>` : ""}
+        <p>${roster.length ? `${roster.length} player${roster.length === 1 ? "" : "s"} drafted` : "No players drafted yet"} · Tap the header to switch teams.</p>
+      </div>
+      <div class="phone-budget"><span><small>REMAINING</small><strong>$${Number(rosterTeam.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(rosterTeam.maxBid || 0)}</strong></span><span><small>PLAYERS</small><strong>${Number(rosterTeam.rosterCount || 0)}/${Number(rosterTeam.rosterSize || 0)}</strong></span></div>
+      <div class="phone-roster-list">${roster.length ? roster.map((rosterPlayer, index) => `<div class="phone-roster-row"><span class="roster-index">${String(index + 1).padStart(2, "0")}</span><span class="roster-position">${escapeHtml(rosterPlayer.position)}</span><span class="roster-player"><strong>${escapeHtml(rosterPlayer.name)}</strong><small>${escapeHtml(rosterPlayer.nflTeam)}</small></span><b>$${Number(rosterPlayer.price || 0)}</b></div>`).join("") : `<div class="phone-roster-empty"><strong>No players yet</strong><span>${escapeHtml(rosterTeam.name)}’s purchases will appear here as players are sold.</span></div>`}</div>
     </div>`;
-  renderShell(`<section class="bidder-room" style="--team:${team.color}">
+  const historyTab = `<div class="phone-history-view">
+      <div class="phone-history-title"><span class="kicker">DRAFT LEDGER</span><h1>Auction history</h1><p>${history.length ? `${history.length} completed auction${history.length === 1 ? "" : "s"} · Most recent first` : "Completed auctions will appear here."}</p></div>
+      <div class="phone-history-list">${history.length ? [...history].reverse().map((sale) => `<article class="phone-history-row"><span class="history-lot">${String(Number(sale.lotNumber || 0)).padStart(2, "0")}</span><span class="history-player"><small>${escapeHtml(sale.position)} · ${escapeHtml(sale.nflTeam)}</small><strong>${escapeHtml(sale.playerName)}</strong></span><b>$${Number(sale.amount || 0)}</b><span class="history-winner" style="--history-team:${sale.teamColor}"><i></i><span><small>WINNING TEAM</small><strong>${escapeHtml(sale.teamName)}</strong><em>${escapeHtml(sale.manager)}</em></span></span></article>`).join("") : `<div class="phone-history-empty"><strong>No completed auctions yet</strong><span>Winning players, prices, and teams will appear here after each sale.</span></div>`}</div>
+    </div>`;
+  renderShell(`<section class="bidder-room ${activePhoneTab === "history" ? "is-history" : ""}" style="--team:${team.color}">
     <div class="phone-team-header"><span><small>YOUR TEAM</small><strong>${escapeHtml(team.manager)}</strong><b>${escapeHtml(team.name)}</b></span><button data-action="switch-team">Switch</button></div>
-    <nav class="phone-tabs" aria-label="Bidder views"><button class="${activePhoneTab === "auction" ? "is-active" : ""}" data-action="show-tab" data-tab="auction">Auction</button><button class="${activePhoneTab === "roster" ? "is-active" : ""}" data-action="show-tab" data-tab="roster">Roster <b>${roster.length}</b></button></nav>
+    <nav class="phone-tabs has-history" aria-label="Bidder views"><button class="${activePhoneTab === "auction" ? "is-active" : ""}" data-action="show-tab" data-tab="auction">Auction</button><button class="${activePhoneTab === "roster" ? "is-active" : ""}" data-action="show-tab" data-tab="roster">Roster <b>${roster.length}</b></button><button class="${activePhoneTab === "history" ? "is-active" : ""}" data-action="show-tab" data-tab="history">History <b>${history.length}</b></button></nav>
     ${room.meetingLink ? `<a class="league-call-link" href="${escapeHtml(room.meetingLink)}" target="_blank" rel="noreferrer">Join league call</a>` : ""}
-    ${activePhoneTab === "roster" ? rosterTab : auctionTab}
+    ${activePhoneTab === "roster" ? rosterTab : activePhoneTab === "history" ? historyTab : auctionTab}
   </section>`);
 }
 

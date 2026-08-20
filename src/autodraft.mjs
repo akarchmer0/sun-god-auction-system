@@ -1,4 +1,4 @@
-import { canTeamRosterPlayer, maxBidForTeam, ROSTER_POSITIONS } from "./domain.mjs";
+import { canTeamRosterPlayer, maxBidForTeam, nextLegalBidAmount, ROSTER_POSITIONS } from "./domain.mjs";
 
 export const AUTO_INTENTS = Object.freeze(["pass", "discount", "value", "target"]);
 export const AUTO_INTENT_REASONS = Object.freeze([
@@ -59,9 +59,13 @@ export function localAutoIntent(state, teamId, playerId = state?.auction?.player
 
   const saturationLimit = Math.max(1, requirements[position]) + (["RB", "WR"].includes(position) ? 2 : 1);
   if ((counts[position] || 0) >= saturationLimit) {
+    const missingRequired = missingRequiredSlotCount(requirements, counts);
+    if (!["K", "DST"].includes(position) && openSlots > missingRequired) {
+      return { intent: "discount", reason: "position_saturated" };
+    }
     return { intent: "pass", reason: "position_saturated" };
   }
-  if (team.budget <= openSlots + Math.max(2, Math.round(Number(player.suggestedValue) * 0.3))) {
+  if (team.budget <= openSlots + Math.max(2, Math.round(playerSuggestedValue(player) * 0.3))) {
     return { intent: "discount", reason: "budget_preservation" };
   }
   return { intent: "value", reason: "value_opportunity" };
@@ -73,14 +77,14 @@ export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction
   if (!team || !player || !isAutoTeam(team) || !canTeamRosterPlayer(state, teamId, playerId)) return 0;
 
   const normalizedIntent = AUTO_INTENTS.includes(intent) ? intent : localAutoIntent(state, teamId, playerId).intent;
-  if (normalizedIntent === "pass") return 0;
+  if (normalizedIntent === "pass") return state.auction?.nominatorTeamId === teamId ? 1 : 0;
 
   const standardNormal = deterministicStandardNormal(
     `${team.id}:${player.id}:${state.auction?.nominatorTeamId || ""}:${state.sales?.length || 0}:max-value`
   );
   return Math.min(
     maxBidForTeam(state, teamId),
-    sampledAutoBidValue(player.suggestedValue, normalizedIntent, standardNormal)
+    sampledAutoBidValue(playerSuggestedValue(player), normalizedIntent, standardNormal)
   );
 }
 
@@ -92,15 +96,21 @@ export function sampledAutoBidValue(suggestedValue, intent, standardNormal = 0) 
   return Math.max(0, Math.round(mean + noise));
 }
 
-export function chooseAutoBid(state) {
+export function chooseAutoBid(state, ceilingOverrides = null) {
   if (!["open", "once", "twice"].includes(state?.auction?.phase)) return null;
-  const nextAmount = Math.max(1, Number(state.auction.amount || 0) + Number(state.config?.increment || 1));
+  const nextAmount = nextLegalBidAmount(state);
   const playerId = state.auction.playerId;
   const intents = state.auction.autoIntents || {};
   const candidates = state.teams.map((team) => {
     if (!isAutoTeam(team) || team.id === state.auction.highBidderId) return false;
+    if (!canTeamRosterPlayer(state, team.id, playerId)) return null;
     const intent = intents[team.id]?.intent || localAutoIntent(state, team.id, playerId).intent;
-    const ceiling = calculateAutoBidCeiling(state, team.id, playerId, intent);
+    const overridden = ceilingOverrides && Object.prototype.hasOwnProperty.call(ceilingOverrides, team.id)
+      ? Number(ceilingOverrides[team.id])
+      : null;
+    const ceiling = Number.isFinite(overridden)
+      ? Math.min(maxBidForTeam(state, team.id), Math.max(team.id === state.auction.nominatorTeamId ? 1 : 0, Math.round(overridden)))
+      : calculateAutoBidCeiling(state, team.id, playerId, intent);
     return nextAmount <= ceiling ? { team, intent, ceiling } : null;
   }).filter(Boolean);
   if (!candidates.length) return null;
@@ -122,7 +132,7 @@ export function chooseAutoNomination(state, teamId) {
   return available.map((player) => {
     const decision = localAutoIntent(state, teamId, player.id);
     const intentBonus = decision.intent === "target" ? 1.1 : decision.intent === "value" ? 1 : decision.intent === "discount" ? 0.9 : 0.25;
-    const score = Math.max(1, Number(player.suggestedValue) || 1) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
+    const score = playerSuggestedValue(player) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
     return { player, score };
   }).sort((a, b) => b.score - a.score || a.player.id.localeCompare(b.player.id))[0].player.id;
 }
@@ -137,11 +147,18 @@ export function buildAutoIntentContext(state) {
     suggestedValue: wholeNumber(soldPlayers.get(sale.playerId)?.suggestedValue)
   }));
   return {
+    nomination: {
+      nominatorTeamId: String(state.auction?.nominatorTeamId || ""),
+      openingBid: 1,
+      committedToNominator: true
+    },
     player: {
       id: player?.id || "",
       name: cleanText(player?.name, 100),
       position: normalizePosition(player?.position),
-      suggestedValue: wholeNumber(player?.suggestedValue)
+      suggestedValue: wholeNumber(player?.suggestedValue),
+      marketAverage: wholeNumber(player?.marketAverage),
+      marketProjected: wholeNumber(player?.marketProjected)
     },
     league: {
       budget: wholeNumber(state.config?.budget),
@@ -212,6 +229,13 @@ function missingFlexSlots(requirements, counts) {
   return Math.max(0, (requirements.FLEX || 0) - flexEligibleSurplus);
 }
 
+function missingRequiredSlotCount(requirements, counts) {
+  const baseMissing = ROSTER_POSITIONS.filter((position) => position !== "FLEX").reduce((total, position) => {
+    return total + Math.max(0, (requirements[position] || 0) - (counts[position] || 0));
+  }, 0);
+  return baseMissing + missingFlexSlots(requirements, counts);
+}
+
 function deterministicStandardNormal(key) {
   const first = Math.max(Number.EPSILON, deterministicUnit(`${key}:u1`));
   const second = deterministicUnit(`${key}:u2`);
@@ -242,6 +266,10 @@ function normalizePosition(value) {
 
 function cleanText(value, maximum) {
   return String(value || "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, maximum);
+}
+
+function playerSuggestedValue(player) {
+  return Math.max(1, Number(player?.suggestedValue) || 1);
 }
 
 function wholeNumber(value) {

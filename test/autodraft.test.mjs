@@ -49,6 +49,21 @@ test("local strategy targets missing requirements and saves kicker for later", (
   assert.deepEqual(localAutoIntent(state, "a", "kicker"), { intent: "pass", reason: "late_round_depth" });
 });
 
+test("local strategy uses discounted bench depth instead of stalling before the roster is full", () => {
+  const state = draft();
+  state.players.push(
+    { id: "runner-two", name: "Runner Two", position: "RB", nflTeam: "FA", suggestedValue: 8, status: "sold" },
+    { id: "runner-three", name: "Runner Three", position: "RB", nflTeam: "FA", suggestedValue: 7, status: "sold" },
+    { id: "runner-four", name: "Runner Four", position: "RB", nflTeam: "FA", suggestedValue: 6, status: "available" }
+  );
+  state.teams[0].roster = [
+    { playerId: "runner", price: 10 },
+    { playerId: "runner-two", price: 5 },
+    { playerId: "runner-three", price: 4 }
+  ];
+  assert.deepEqual(localAutoIntent(state, "a", "runner-four"), { intent: "discount", reason: "position_saturated" });
+});
+
 test("intent maximums use the specified normal distributions", () => {
   assert.equal(sampledAutoBidValue(100, "pass", 10), 0);
   assert.equal(sampledAutoBidValue(100, "discount", 0), 90);
@@ -70,15 +85,35 @@ test("sampled maximums are stable and respect the legal roster reserve", () => {
   assert.equal(calculateAutoBidCeiling(state, "a", "runner", "pass"), 0);
 });
 
+test("Yahoo average remains context and does not replace the opponent suggested-value anchor", () => {
+  const projectedState = draft();
+  const marketState = draft();
+  marketState.players.find((player) => player.id === "runner").marketAverage = 60;
+  const projectedCeiling = calculateAutoBidCeiling(projectedState, "a", "runner", "value");
+  const marketCeiling = calculateAutoBidCeiling(marketState, "a", "runner", "value");
+  assert.equal(marketCeiling, projectedCeiling);
+});
+
 test("auto bidders raise by only the next legal increment", () => {
   let state = openAuction(nominatePlayer(draft(), "runner"));
   state.auction.autoIntents = {
-    a: { intent: "value", reason: "value_opportunity" },
-    b: { intent: "pass", reason: "roster_balance" }
+    a: { intent: "pass", reason: "roster_balance" },
+    b: { intent: "value", reason: "value_opportunity" }
   };
   const decision = chooseAutoBid(state);
-  assert.equal(decision.amount, 1);
+  assert.equal(decision.amount, 2);
   assert.ok(decision.ceiling > decision.amount);
+});
+
+test("a passing auto nominator remains committed at one dollar but never raises", () => {
+  let state = openAuction(nominatePlayer(draft(), "runner"));
+  state.auction.autoIntents = {
+    a: { intent: "pass", reason: "roster_balance" },
+    b: { intent: "pass", reason: "roster_balance" }
+  };
+  assert.equal(state.auction.highBidderId, "a");
+  assert.equal(calculateAutoBidCeiling(state, "a", "runner", "pass"), 1);
+  assert.equal(chooseAutoBid(state), null);
 });
 
 test("structured intents are accepted only for auto teams and known enums", () => {

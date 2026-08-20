@@ -22,6 +22,8 @@ test("server allowlists public assets and authenticates commissioner APIs", asyn
 
   const asset = await fetch(`${base}/src/app.mjs`);
   assert.equal(asset.status, 200);
+  const fantasyProsAsset = await fetch(`${base}/src/fantasy-pros-data.mjs`);
+  assert.equal(fantasyProsAsset.status, 200);
   assert.match(asset.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
 

@@ -22,10 +22,12 @@ test("remote bidder ships the same visual system and shared bidding modules as l
   assert.equal(remoteTransports, localTransports);
 });
 
-test("remote bidder exposes the local auction, easy-bid, custom-bid, and roster views", async () => {
-  const [html, client] = await Promise.all([
+test("remote bidder exposes auction, roster, and completed-auction history views", async () => {
+  const [html, client, localClient, hostClient] = await Promise.all([
     source("relay/public/index.html"),
-    source("relay/public/bidder.mjs")
+    source("relay/public/bidder.mjs"),
+    source("src/bidder.mjs"),
+    source("src/app.mjs")
   ]);
 
   assert.match(html, /id="bidder-app"/);
@@ -36,7 +38,20 @@ test("remote bidder exposes the local auction, easy-bid, custom-bid, and roster 
   assert.match(client, /id="custom-bid-form"/);
   assert.match(client, /class="phone-roster-list"/);
   assert.match(client, /data-tab="roster"/);
+  assert.match(client, /data-tab="history"/);
+  assert.match(client, /class="phone-history-list"/);
+  assert.match(client, /class="history-winner"/);
   assert.match(client, /class="league-call-link"/);
+  assert.doesNotMatch(localClient, /data-tab="history"/);
+  assert.match(hostClient, /history: buildPhoneAuctionHistory\(state\)/);
+  for (const bidderClient of [localClient, client]) {
+    assert.match(bidderClient, /class="phone-bid-holder"/);
+    assert.match(bidderClient, /HELD BY/);
+    assert.match(bidderClient, /highBidder\.name/);
+    assert.match(bidderClient, /data-action="toggle-roster-picker"/);
+    assert.match(bidderClient, /data-action="view-roster"/);
+    assert.match(bidderClient, /const rosterTeam = room\.teams\.find/);
+  }
 });
 
 function source(pathname) {
