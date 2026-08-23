@@ -66,7 +66,7 @@ const publicAssets = new Map([
     "data.mjs", "fantasy-pros-data.mjs", "auctioneer-voice.mjs", "auctioneer-speech-providers.mjs", "auctioneer-speed.mjs",
     "auctioneer-script.mjs", "auctioneer-patter.mjs", "roast-engine.mjs",
     "phone-bidding.mjs", "draft-io.mjs", "vision-bidding.mjs", "domain.mjs", "autodraft.mjs"
-    , "room-protocol.mjs", "room-transports.mjs", "draft-state-validation.mjs", "yahoo-market-values.mjs"
+    , "room-protocol.mjs", "room-transports.mjs", "remote-speech-relay.mjs", "draft-state-validation.mjs", "yahoo-market-values.mjs"
   ].map((name) => [`/src/${name}`, `src/${name}`]),
   ["/vendor/qrcodegen.js", "vendor/qrcodegen.js"]
   , ["/assets/player-template.csv", "assets/player-template.csv"]

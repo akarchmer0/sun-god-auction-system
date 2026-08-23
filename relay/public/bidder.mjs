@@ -1,4 +1,5 @@
 import { easyBidAmounts } from "./phone-bidding.mjs";
+import { RemotePhoneAudio } from "./phone-audio.mjs";
 import { RelayRoomTransport } from "./room-transports.mjs";
 
 const app = document.querySelector("#bidder-app");
@@ -23,6 +24,7 @@ let roomTransport = null;
 let activePhoneTab = "auction";
 let viewedRosterTeamId = selectedTeamId;
 let rosterPickerOpen = false;
+const phoneAudio = new RemotePhoneAudio({ onStateChange: () => render() });
 
 localStorage.setItem(TOKEN_KEY, participantToken);
 render();
@@ -47,6 +49,8 @@ function wireEvents() {
     const button = event.target.closest("[data-action]");
     if (!button) return;
     try {
+      if (button.dataset.action === "toggle-sound") { await phoneAudio.toggle(); render(); return; }
+      if (phoneAudio.enabled && phoneAudio.state !== "on") void phoneAudio.unlock();
       if (button.dataset.action === "claim") return await claimTeam(button.dataset.teamId);
       if (button.dataset.action === "bid") return await placePhoneBid(button.dataset.amount == null ? null : Number(button.dataset.amount));
       if (button.dataset.action === "show-tab") {
@@ -70,10 +74,12 @@ function wireEvents() {
       showMessage(error.message, "error");
     }
   });
+  document.addEventListener("visibilitychange", () => phoneAudio.handleVisibilityChange(document.hidden));
 }
 
 function connectToRelay() {
   roomTransport?.close();
+  phoneAudio.cancel();
   connectionState = "connecting";
   claimAuthenticated = false;
   restoreInFlight = false;
@@ -94,6 +100,9 @@ function connectToRelay() {
     },
     (snapshot) => {
       if (roomTransport === transport) handleRelayStatus(snapshot);
+    },
+    (audio) => {
+      if (roomTransport === transport) phoneAudio.handleAudio(audio);
     }
   );
 }
@@ -115,6 +124,7 @@ function handleRelayStatus({ state: nextState, error }) {
     message = error || "The relay could not authenticate this invitation.";
     queueMicrotask(() => roomTransport?.close());
   } else {
+    phoneAudio.cancel();
     if (!room) status = "loading";
     message = nextState === "connecting" ? "Connecting to the draft room…" : "Reconnecting…";
   }
@@ -122,6 +132,10 @@ function handleRelayStatus({ state: nextState, error }) {
 }
 
 function handleRelayMessage(payload) {
+  if (String(payload.type || "").startsWith("speech.")) {
+    phoneAudio.handleControl(payload);
+    return;
+  }
   if (payload.type === "room.snapshot") {
     claimedTeamIds = Array.isArray(payload.claims) ? payload.claims : [];
     hostConnected = payload.hostConnected !== false;
@@ -168,11 +182,13 @@ function handleRelayMessage(payload) {
   }
   if (payload.type === "host.status") {
     hostConnected = payload.connected !== false;
+    if (!hostConnected) phoneAudio.cancel();
     message = connectionMessage();
     render();
     return;
   }
   if (payload.type === "room.close") {
+    phoneAudio.cancel();
     status = "error";
     message = "This remote room has closed. Ask the commissioner for a new invitation link.";
     roomTransport?.close();
@@ -282,7 +298,8 @@ function render() {
 
 function renderShell(content, className = "") {
   app.innerHTML = `<main class="bidder-shell ${className}">
-    <header><span class="phone-sun">${sunLogo()}</span><span><strong>Sun God</strong><small>AUCTION SYSTEMS</small></span><i class="connection-dot ${connectionState === "connected" ? "is-live" : ""}"></i></header>
+    <header><span class="phone-sun">${sunLogo()}</span><span><strong>Sun God</strong><small>AUCTION SYSTEMS</small></span>${soundToggle()}<i class="connection-dot ${connectionState === "connected" ? "is-live" : ""}"></i></header>
+    <div class="phone-audio-feedback ${phoneAudio.state === "unsupported" || phoneAudio.statusText.startsWith("Phone voice error") ? "is-error" : ""}" role="status" aria-live="polite">${escapeHtml(phoneAudio.statusText)}</div>
     ${content}
   </main>`;
 }
@@ -396,6 +413,12 @@ function showMessage(nextMessage, kind = "") {
 
 function teamStorageKey(id) { return `sun-god-room-${id}-team`; }
 function createToken() { return globalThis.crypto?.randomUUID?.().replaceAll("-", "_") || `phone_${Date.now()}_${Math.random().toString(36).slice(2)}`; }
+function soundToggle() {
+  const state = phoneAudio.state;
+  const label = state === "unsupported" ? "Browser voice unavailable" : state === "muted" ? "Turn on auctioneer sound" : state === "on" ? "Mute auctioneer sound" : "Tap to enable auctioneer sound";
+  return `<button class="phone-sound-toggle ${state === "on" ? "is-on" : state === "needs-gesture" ? "needs-gesture" : ""}" data-action="toggle-sound" aria-label="${label}" aria-pressed="${state !== "muted"}" title="${label}">${soundIcon(state === "muted")}</button>`;
+}
 function phaseLabel(phase) { return ({ idle: "Room ready", ready: "Player nominated", open: "Bidding live", once: "Going once", twice: "Going twice", paused: "Auction paused", sold: "Sold", passed: "No sale" })[phase] || "Room ready"; }
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 function sunLogo() { return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="16" fill="#d39a20" stroke="currentColor" stroke-width="3"/><circle cx="26" cy="29" r="2" fill="currentColor"/><circle cx="38" cy="29" r="2" fill="currentColor"/><path d="M24 38c5 4 11 4 16 0M32 3v8M32 53v8M3 32h8M53 32h8M11.5 11.5l5.7 5.7M46.8 46.8l5.7 5.7M52.5 11.5l-5.7 5.7M17.2 46.8l-5.7 5.7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`; }
+function soundIcon(muted) { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10H4Z" fill="currentColor"/><path d="M16 9c1.4 1.6 1.4 4.4 0 6M18.5 6.5c3 3 3 8 0 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>${muted ? `<path d="m15 8 6 8M21 8l-6 8" fill="none" stroke="#9d3c28" stroke-width="2" stroke-linecap="round"/>` : ""}</svg>`; }

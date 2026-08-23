@@ -34,6 +34,8 @@ test("remote bidder exposes auction, roster, and completed-auction history views
   assert.match(html, /family=DM\+Mono/);
   assert.match(client, /easyBidAmounts/);
   assert.match(client, /RelayRoomTransport/);
+  assert.match(client, /RemotePhoneAudio/);
+  assert.match(client, /data-action="toggle-sound"/);
   assert.match(client, /class="easy-bid-grid"/);
   assert.match(client, /id="custom-bid-form"/);
   assert.match(client, /class="phone-roster-list"/);

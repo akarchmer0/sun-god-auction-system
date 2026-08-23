@@ -7,6 +7,21 @@ test("room protocol creates versioned envelopes and rejects incompatible message
   assert.equal(validateRoomMessage(message).amount, 12);
   assert.throws(() => validateRoomMessage({ ...message, protocolVersion: 2 }), /unsupported protocol/);
   assert.throws(() => createRoomMessage("unknown"), /Unsupported/);
+  assert.equal(validateRoomMessage(createRoomMessage("speech.start", {
+    speechId: "speech_12345", sampleRate: 24_000, encoding: "pcm_s16le"
+  })).sampleRate, 24_000);
+  assert.throws(() => validateRoomMessage(createRoomMessage("speech.start", {
+    speechId: "short", sampleRate: 24_000, encoding: "pcm_s16le"
+  })), /Speech ID/);
+  assert.throws(() => validateRoomMessage(createRoomMessage("speech.fallback", {
+    speechId: "speech_12345", transcript: ""
+  })), /transcript/);
+  assert.equal(validateRoomMessage(createRoomMessage("speech.audio", {
+    speechId: "speech_12345", data: Buffer.from([0, 0]).toString("base64")
+  })).type, "speech.audio");
+  assert.throws(() => validateRoomMessage(createRoomMessage("speech.audio", {
+    speechId: "speech_12345", data: "not base64!"
+  })), /Speech audio/);
 });
 
 test("message deduplication is bounded and idempotent", () => {

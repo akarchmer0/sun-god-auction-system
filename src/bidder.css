@@ -12,6 +12,12 @@ button { color: inherit; }
 .phone-sun svg { width: 100%; height: 100%; }
 .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #8f877a; }
 .connection-dot.is-live { background: #396b49; box-shadow: 0 0 0 5px rgba(57,107,73,.13); }
+.phone-sound-toggle { width: 38px; height: 38px; padding: 7px; border: 1px solid #a99c83; border-radius: 50%; display: grid; place-items: center; background: #fff9ed; color: #746a5a; cursor: pointer; touch-action: manipulation; }
+.phone-sound-toggle svg { width: 22px; height: 22px; }
+.phone-sound-toggle.is-on { border-color: #396b49; background: #e1eadf; color: #214b30; }
+.phone-sound-toggle.needs-gesture { border-color: #d39a20; color: #8a5b00; box-shadow: 0 0 0 4px rgba(211,154,32,.14); }
+.phone-audio-feedback { padding: 7px 14px; background: rgba(211,154,32,.13); border-bottom: 1px solid rgba(211,154,32,.25); color: #735315; font-size: 11px; font-weight: 700; line-height: 1.25; text-align: center; }
+.phone-audio-feedback.is-error { background: rgba(157,60,40,.12); border-bottom-color: rgba(157,60,40,.24); color: #8f2f1e; }
 .kicker { color: #746a5a; font: 600 9px/1 "DM Mono", monospace; letter-spacing: .16em; }
 .join-screen { width: min(100%, 430px); margin: auto; padding: 34px 24px 60px; text-align: center; }
 .join-screen h1, .team-choice h1 { margin: 10px 0 8px; font-size: 34px; line-height: 1; letter-spacing: -.05em; }

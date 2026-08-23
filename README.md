@@ -14,7 +14,7 @@ Then open `http://localhost:4173` in Chrome. Keep the laptop and bidder phones o
 
 For the personal desktop build, run `pnpm desktop` during development or `pnpm dist:mac` to produce an Apple-Silicon DMG. The app has no license, payment, account, or expiration gate. Relay and provider credentials entered in the desktop setup are encrypted with Electron `safeStorage` and macOS Keychain.
 
-The personal remote relay lives in `relay/`. It creates private, 24-hour rooms for your league and is protected by one long admin secret known only to the commissioner app and your Worker. In remote mode every phone—including phones in the room—uses the same HTTPS relay link for consistent timestamps. Sun God transports bids and public rosters only; league audio stays in Zoom, Meet, Discord, FaceTime, or another call.
+The personal remote relay lives in `relay/`. It creates private, 24-hour rooms for your league and is protected by one long admin secret known only to the commissioner app and your Worker. In remote mode every phone—including phones in the room—uses the same HTTPS relay link for consistent timestamps. Sun God transports bids, public rosters, and the auctioneer transcript; each phone reads that transcript with its browser voice and has its own sound control. Bidder conversation can stay in Zoom, Meet, Discord, FaceTime, or another call.
 
 ### Personal remote setup
 
@@ -47,7 +47,7 @@ The server exchanges the permanent key for a single-use WebSocket token. The per
 
 ### Cartesia Lucy
 
-Sun God keeps a Cartesia WebSocket warm on the Mac and streams raw audio to the host browser. Every announcement has its own speech context. Valid phone bids update the auction immediately, then wait for the current spoken line to finish before Lucy gives a fresh, energetic acknowledgement; countdowns, rulings, nominations, and sales each use different pacing and emotional direction.
+Sun God keeps a Cartesia WebSocket warm on the Mac and streams raw audio to the host browser. In remote mode, the exact transcript and performance settings are forwarded to bidder phones, which use their built-in browser voice without receiving provider audio or keys. Every announcement has its own speech context. Valid phone bids update the auction immediately, then wait for the current spoken line to finish before Lucy gives a fresh, energetic acknowledgement; countdowns, rulings, nominations, and sales each use different pacing and emotional direction.
 
 1. Create a Cartesia API key at `https://play.cartesia.ai/keys`.
 2. If you have not already created local configuration, run:
@@ -72,7 +72,7 @@ Completed countdown calls are cached in a bounded in-memory audio cache, keyed b
 
 ## Phone bidding
 
-The laptop creates a private room code and join link. Local mode uses the Mac’s network address; personal remote mode uses your HTTPS relay. No participant app or account is required.
+The laptop creates a private room code and join link. Local mode uses the Mac’s network address; personal remote mode uses your HTTPS relay. No participant app or account is required. Remote bidder pages default to sound enabled; the first team-selection or speaker-button tap unlocks mobile playback, and the speaker button can mute that phone at any time.
 
 1. Finish the team order in **League setup**.
 2. Each participant scans the QR code in the **Phone bidding** panel.
@@ -173,7 +173,7 @@ The results page can download a universal CSV or copy tab-separated tables arran
 - `src/vision-bidding.mjs` supplies the shared 300 ms simultaneous-bid classification used by the host.
 - `server.mjs` serves the host and phone pages, broadcasts local room events, directs patter, and relays ElevenLabs or Cartesia speech; permanent provider keys remain server-side.
 - Draft state is persisted locally on the commissioner’s Mac with browser fallback recovery.
-- Local phone-room traffic stays on the local network; remote phone-room traffic uses the commissioner’s personal relay. Sun God does not capture or transcribe bidder audio.
+- Local phone-room traffic stays on the local network; remote phone-room traffic uses the commissioner’s personal relay. The relay forwards auctioneer transcripts for browser TTS and does not receive generated provider audio. Sun God does not capture or transcribe bidder microphone audio.
 - ElevenLabs and Cartesia are selectable production voice providers; the browser speech engine remains the automatic final fallback.
 
 ## Test

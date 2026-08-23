@@ -59,11 +59,13 @@ export class RelayRoomTransport {
     this.reconnectAttempt = 0;
     this.onEvent = () => {};
     this.onStatus = () => {};
+    this.onBinary = () => {};
   }
 
-  connect(onEvent, onStatus = () => {}) {
+  connect(onEvent, onStatus = () => {}, onBinary = () => {}) {
     this.onEvent = onEvent;
     this.onStatus = onStatus;
+    this.onBinary = onBinary;
     this.closed = false;
     this.#open();
     return this;
@@ -92,6 +94,18 @@ export class RelayRoomTransport {
     return true;
   }
 
+  notifyBinary(payload) {
+    if (!this.socket || this.socket.readyState !== 1 || !this.authenticated || this.role !== "host") return false;
+    const bytes = payload instanceof ArrayBuffer
+      ? payload
+      : ArrayBuffer.isView(payload)
+        ? payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
+        : null;
+    if (!bytes?.byteLength) return false;
+    this.socket.send(bytes);
+    return true;
+  }
+
   close() {
     this.closed = true;
     this.authenticated = false;
@@ -106,6 +120,7 @@ export class RelayRoomTransport {
     const scheme = this.baseUrl.replace(/^http/, "ws");
     this.onStatus({ state: this.reconnectAttempt ? "reconnecting" : "connecting" });
     const socket = new this.WebSocketImpl(`${scheme}/v1/rooms/${encodeURIComponent(this.roomId)}/${this.role === "host" ? "host" : "participant"}`);
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.addEventListener("open", () => {
       const type = this.role === "host" ? "host.hello" : "participant.join";
@@ -134,6 +149,15 @@ export class RelayRoomTransport {
   }
 
   #receive(raw) {
+    if (typeof Blob !== "undefined" && raw instanceof Blob) {
+      void raw.arrayBuffer().then((bytes) => this.onBinary(bytes)).catch(() => {});
+      return;
+    }
+    if (raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
+      const bytes = raw instanceof ArrayBuffer ? raw : raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+      this.onBinary(bytes);
+      return;
+    }
     let message;
     try { message = validateRoomMessage(JSON.parse(raw)); }
     catch { return; }

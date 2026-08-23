@@ -1,6 +1,7 @@
 import { makeTeams, parseTeamSetupLines } from "./data.mjs";
 import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
+import { RemoteSpeechRelay } from "./remote-speech-relay.mjs";
 import {
   AUCTIONEER_SPEED_OPTIONS,
   auctioneerSpeedAt,
@@ -129,9 +130,13 @@ let auctioneerService = {
   message: "Checking Cartesia's realtime auctioneer."
 };
 let auctioneerScript = createAuctioneerScript(auctioneerProfile);
+const remoteSpeechRelay = new RemoteSpeechRelay({
+  getTransport: () => phoneRoom.mode === "remote" && phoneRoom.status === "live" ? phoneRoomTransport : null
+});
 const auctioneerVoice = new AuctioneerVoice({
   provider: auctioneerProfile.provider,
   fetchImpl: hostFetch,
+  onPlaybackEvent: (event) => remoteSpeechRelay.handle(event),
   onStatusChange: (snapshot) => {
     const changed = snapshot.status !== auctioneerService.status
       || snapshot.available !== auctioneerService.available
@@ -164,6 +169,7 @@ function render() {
   const highBidder = state.teams.find((team) => team.id === state.auction.highBidderId);
   const nextNominator = currentNominator(state);
   const lotNominator = state.teams.find((team) => team.id === state.auction.nominatorTeamId) || nextNominator;
+  const participantNominator = ["ready", "open", "once", "twice"].includes(state.auction.phase) ? lotNominator : nextNominator;
   const available = state.players.filter((item) => item.status === "available");
   const humanTeamCount = state.teams.filter((team) => !isAutoTeam(team)).length;
   const nextPlayers = state.queue
@@ -272,7 +278,9 @@ function render() {
             ${state.teams.map((team) => {
               const joined = phoneRoom.claimedTeamIds.includes(team.id);
               const automatic = isAutoTeam(team);
-              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""}" title="${escapeHtml(team.name)} · ${automatic ? "Auto draft" : joined ? "Phone ready" : "Waiting for phone"}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${automatic ? "AUTO" : joined ? "READY" : "WAIT"}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
+              const nominating = team.id === participantNominator?.id;
+              const status = nominating ? "NOMINATING" : automatic ? "AUTO" : joined ? "READY" : "WAIT";
+              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""} ${nominating ? "is-nominator" : ""}" title="${escapeHtml(team.name)} · ${nominating ? "Currently nominating" : automatic ? "Auto draft" : joined ? "Phone ready" : "Waiting for phone"}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${status}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
             }).join("")}
           </div>
         </section>
@@ -289,7 +297,7 @@ function render() {
 function onboardingDialog() {
   return `<form id="onboarding-form" method="dialog">
     <div class="dialog-head"><div><span class="eyebrow">PERSONAL LEAGUE</span><h2>Commissioner setup</h2></div></div>
-    <p>Sun God is local-first. Add your private relay settings for remote league members; league audio stays in your conferencing app.</p>
+    <p>Sun God is local-first. Add your private relay settings for remote league members; Lucy’s live voice can also play on each bidder phone.</p>
     <div class="form-grid">
       <label>Personal relay URL (optional)<input name="SUN_GOD_RELAY_URL" type="url" placeholder="https://your-relay.workers.dev" autocomplete="off" /></label>
       <label>Personal relay admin secret<input name="SUN_GOD_RELAY_ADMIN_SECRET" type="password" autocomplete="off" /></label>
@@ -1409,6 +1417,7 @@ async function initializeRelayRoom() {
       phoneRoom.error = error || "The remote bidding relay could not authenticate this room.";
       showNotice({ kind: "error", message: phoneRoom.error });
     } else {
+      remoteSpeechRelay.reset();
       phoneRoom.status = connectionState === "connecting" ? "starting" : "reconnecting";
       clearTimer();
       clearAutoDraftTimer();
@@ -1426,6 +1435,7 @@ async function toggleBiddingMode() {
   clearTimer();
   clearAutoDraftTimer();
   if (phoneRoom.mode === "remote") {
+    remoteSpeechRelay.reset();
     try { await phoneRoomTransport?.closeRoom?.(); } catch {}
     phoneRoomTransport?.close();
     phoneRoom.mode = "local";

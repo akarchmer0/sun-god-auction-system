@@ -192,3 +192,54 @@ test("stream completion watchdog releases speech when a PCM source omits onended
   assert.equal(finished, true);
   assert.equal(voice.isSpeaking, false);
 });
+
+test("realtime playback exposes ordered start, PCM, and end events for remote listeners", async () => {
+  class FakeAudioContext {
+    constructor() { this.state = "running"; this.currentTime = 0; this.destination = {}; }
+    createBuffer() { return { duration: 0, copyToChannel() {} }; }
+    createBufferSource() {
+      return { connect() {}, start() { queueMicrotask(() => this.onended?.()); }, stop() {}, onended: null };
+    }
+  }
+  const pcm = Buffer.from([0, 0, 1, 0]).toString("base64");
+  const stream = [
+    { type: "start", provider: "cartesia", sampleRate: 24_000 },
+    { type: "audio", data: pcm },
+    { type: "done" }
+  ].map((event) => `${JSON.stringify(event)}\n`).join("");
+  const events = [];
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: FakeAudioContext,
+    fetchImpl: async () => new Response(stream),
+    onPlaybackEvent: (event) => events.push(event)
+  });
+  voice.status.available = true;
+  voice.speak("Sold");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.deepEqual(events.map((event) => event.type), ["start", "audio", "end"]);
+  assert.equal(events[0].speechId, events[1].speechId);
+  assert.equal(events[1].speechId, events[2].speechId);
+  assert.equal(events[0].sampleRate, 24_000);
+  assert.equal(events[0].transcript, "Sold");
+  assert.equal(events[0].performance.style, "neutral");
+});
+
+test("browser fallback exposes transcript lifecycle and interruption", () => {
+  const utterances = [];
+  class FakeUtterance { constructor(text) { this.text = text; } }
+  const events = [];
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: null,
+    speechSynthesisImpl: { cancel() {}, getVoices() { return []; }, speak(value) { utterances.push(value); } },
+    UtteranceImpl: FakeUtterance,
+    onPlaybackEvent: (event) => events.push(event)
+  });
+  voice.status.available = false;
+  voice.speak("Going once", { style: "countdown" });
+  voice.cancel();
+
+  assert.deepEqual(events.map((event) => event.type), ["fallback", "cancel"]);
+  assert.equal(events[0].transcript, "Going once");
+  assert.equal(events[0].performance.style, "countdown");
+});
