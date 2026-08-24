@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AuctioneerVoice, decodePcm16 } from "../src/auctioneer-voice.mjs";
+import { AuctioneerVoice, decodePcm16, timeCompressPcm } from "../src/auctioneer-voice.mjs";
+
+function positiveZeroCrossings(samples) {
+  let crossings = 0;
+  for (let index = 1; index < samples.length; index += 1) {
+    if (samples[index - 1] <= 0 && samples[index] > 0) crossings += 1;
+  }
+  return crossings;
+}
 
 test("PCM decoder converts little-endian signed 16-bit samples", () => {
   const bytes = Buffer.from([0x00, 0x80, 0x00, 0x00, 0xff, 0x7f]);
@@ -223,6 +231,63 @@ test("realtime playback exposes ordered start, PCM, and end events for remote li
   assert.equal(events[0].sampleRate, 24_000);
   assert.equal(events[0].transcript, "Sold");
   assert.equal(events[0].performance.style, "neutral");
+});
+
+test("ElevenLabs PCM is time-compressed without changing source playback pitch", async () => {
+  const sources = [];
+  const bufferLengths = [];
+  class FakeAudioContext {
+    constructor() { this.state = "running"; this.currentTime = 0; this.destination = {}; }
+    createBuffer(_channels, length, sampleRate) {
+      bufferLengths.push(length);
+      return { duration: length / sampleRate, copyToChannel() {} };
+    }
+    createBufferSource() {
+      const source = {
+        playbackRate: { value: 1 },
+        connect() {},
+        start(at) { this.startAt = at; },
+        stop() {},
+        onended: null
+      };
+      sources.push(source);
+      return source;
+    }
+  }
+  const pcmSamples = new Int16Array(4_800);
+  for (let index = 0; index < pcmSamples.length; index += 1) {
+    pcmSamples[index] = Math.round(Math.sin(2 * Math.PI * 220 * index / 24_000) * 16_000);
+  }
+  const pcm = Buffer.from(pcmSamples.buffer).toString("base64");
+  const stream = [
+    { type: "start", provider: "elevenlabs", sampleRate: 24_000 },
+    { type: "audio", data: pcm },
+    { type: "done" }
+  ].map((event) => `${JSON.stringify(event)}\n`).join("");
+  const voice = new AuctioneerVoice({
+    AudioContextImpl: FakeAudioContext,
+    fetchImpl: async () => new Response(stream)
+  });
+  voice.status.available = true;
+  voice.speak("Sold", { speed: "fastest" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(sources[0].playbackRate.value, 1);
+  assert.ok(bufferLengths[0] < pcmSamples.length);
+  voice.cancel();
+});
+
+test("time compression shortens PCM while preserving its dominant pitch", () => {
+  const sampleRate = 24_000;
+  const frequency = 220;
+  const input = Float32Array.from({ length: sampleRate }, (_, index) => (
+    Math.sin(2 * Math.PI * frequency * index / sampleRate)
+  ));
+  const compressed = timeCompressPcm(input, 1.3);
+  const measuredFrequency = positiveZeroCrossings(compressed) / (compressed.length / sampleRate);
+
+  assert.ok(compressed.length < input.length * 0.85);
+  assert.ok(Math.abs(measuredFrequency - frequency) < 8);
 });
 
 test("browser fallback exposes transcript lifecycle and interruption", () => {

@@ -9,7 +9,8 @@ import {
 
 test("Patter Director prompt demands momentum without accent imitation or invented facts", () => {
   const prompt = buildPatterInstructions({ personality: "hype", energy: 3 });
-  assert.match(prompt, /exactly three/);
+  assert.match(prompt, /exactly one short, funny spoken phrase/);
+  assert.match(prompt, /playful punchline/);
   assert.match(prompt, /Latin American soccer commentary/);
   assert.match(prompt, /Do not imitate an accent/);
   assert.match(prompt, /Never invent injuries/);
@@ -33,11 +34,11 @@ test("live patter context is bounded and normalized", () => {
 });
 
 test("invalid countdown language rejects the entire model queue", () => {
-  assert.deepEqual(normalizePatterLines(["Twenty-eight has the room buzzing.", "Going once at twenty-eight.", "Who makes it twenty-nine?"]), []);
+  assert.deepEqual(normalizePatterLines(["Going once at twenty-eight."]), []);
+  assert.deepEqual(normalizePatterLines(["Twenty-eight has the room buzzing.", "Who makes it twenty-nine?"]), []);
+  assert.deepEqual(normalizePatterLines(["The room is quiet. Every budget is hiding."]), []);
   const payload = { output_text: JSON.stringify({ lines: [
-    "Twenty-eight dollars and this room is shaking.",
-    "Ari holds the lead but every budget is watching.",
     "Who brings twenty-nine and keeps this alive?"
   ] }) };
-  assert.equal(parsePatterResponse(payload).length, 3);
+  assert.equal(parsePatterResponse(payload).length, 1);
 });

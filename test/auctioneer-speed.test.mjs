@@ -5,7 +5,8 @@ import {
   auctioneerSpeedAt,
   auctioneerSpeedIndex,
   auctioneerSpeedOffset,
-  normalizeAuctioneerSpeed
+  normalizeAuctioneerSpeed,
+  realtimePlaybackRate
 } from "../src/auctioneer-speed.mjs";
 
 test("auctioneer speed options form four stable increasing stops", () => {
@@ -14,4 +15,11 @@ test("auctioneer speed options form four stable increasing stops", () => {
   assert.equal(auctioneerSpeedIndex("faster"), 2);
   assert.ok(auctioneerSpeedOffset("fastest") > auctioneerSpeedOffset("fast"));
   assert.equal(normalizeAuctioneerSpeed("warp"), "normal");
+});
+
+test("realtime post-processing accelerates ElevenLabs most strongly", () => {
+  assert.equal(realtimePlaybackRate("elevenlabs", "normal"), 1.08);
+  assert.equal(realtimePlaybackRate("elevenlabs", "fastest"), 1.3);
+  assert.ok(realtimePlaybackRate("elevenlabs", "faster") > realtimePlaybackRate("cartesia", "faster"));
+  assert.equal(realtimePlaybackRate("browser", "fastest"), 1);
 });

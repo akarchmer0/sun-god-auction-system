@@ -843,6 +843,9 @@ function scheduleAutoDraftBid() {
   if (pendingVisualTie || visualBidWindow) return;
   const decision = chooseAutoBid(state);
   if (!decision) return;
+  const countdownWindowMs = countdownDelayMs(state.config, state.auction.phase);
+  const latestSafeBidMs = Math.max(250, countdownWindowMs - 250);
+  const delayMs = Math.min(autoBidDelayMs(state, decision.teamId), latestSafeBidMs);
   autoDraftTimer = window.setTimeout(() => {
     autoDraftTimer = null;
     if (pendingVisualTie || visualBidWindow) return resumeAuctionFlow();
@@ -850,7 +853,7 @@ function scheduleAutoDraftBid() {
     if (!latest) return;
     try { submitBid(latest.teamId, latest.amount, { source: "auto" }); }
     catch { resumeAuctionFlow(); }
-  }, autoBidDelayMs(state, decision.teamId));
+  }, delayMs);
 }
 
 function scheduleAutoNomination() {
@@ -1023,7 +1026,7 @@ async function refillPatterQueue() {
     patterQueue = [];
     patterQueueKey = key;
   }
-  if (patterRequest?.key === key || patterQueue.length > 1) return;
+  if (patterRequest?.key === key || patterQueue.length > 0) return;
   const requestId = ++patterRequestSequence;
   patterRequest = { key, requestId };
   try {
@@ -1038,12 +1041,12 @@ async function refillPatterQueue() {
       })
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || currentPatterKey() !== key || !Array.isArray(payload.lines) || payload.lines.length !== 3) return;
+    if (!response.ok || currentPatterKey() !== key || !Array.isArray(payload.lines) || payload.lines.length !== 1) return;
     const recent = new Set(recentPatterLines.map((line) => line.toLowerCase()));
     const freshLines = payload.lines
       .map((line) => String(line || "").trim())
       .filter((line) => line && !recent.has(line.toLowerCase()));
-    patterQueue = [...patterQueue, ...freshLines].slice(0, 5);
+    patterQueue = freshLines.slice(0, 1);
   } catch {
     // The local rotating script keeps the room moving without waiting for the model.
   } finally {
@@ -1802,7 +1805,7 @@ function providerOptionCopy(provider) {
 
 function patterDirectorLabel() {
   return auctioneerService.patter?.provider === "openai"
-    ? "The AI Patter Director writes three-line live arcs ahead of playback."
+    ? "The AI Patter Director writes one short live phrase ahead of playback."
     : "Lucy's local rotation fills live gaps with rapid stadium-style patter.";
 }
 

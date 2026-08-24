@@ -38,10 +38,10 @@ export function buildPatterInstructions({ personality = "classic", energy = 2 } 
   return `You are the Patter Director for Lucy, a live fantasy-football auctioneer.
 
 Outcome:
-- Write exactly three consecutive spoken lines for Lucy to deliver while bids are open.
-- Each line must be 6 to 18 words, natural aloud, and immediately usable without labels or setup.
-- Build one small arc: establish the live price, intensify the room, then invite the next legal bid.
-- Style the arc as ${PERSONALITY_TONE[personality] || PERSONALITY_TONE.classic}, at energy ${level} of 3.
+- Write exactly one short, funny spoken phrase for Lucy to deliver while bids are open.
+- The phrase must be 4 to 12 words, one sentence, natural aloud, and immediately usable without labels or setup.
+- Aim for a playful punchline about the price, budget, roster, or room; do not build a setup or multi-line arc.
+- Style the phrase as ${PERSONALITY_TONE[personality] || PERSONALITY_TONE.classic}, at energy ${level} of 3.
 - Borrow the sustained momentum, escalation, and celebratory release of elite Latin American soccer commentary. Do not imitate an accent, nationality, or language stereotype.
 
 Auction constraints:
@@ -66,20 +66,21 @@ export function buildPatterInput(context, recentLines = []) {
 
 export function normalizePatterLines(value) {
   const source = Array.isArray(value) ? value : value?.lines;
-  if (!Array.isArray(source)) return [];
+  if (!Array.isArray(source) || source.length !== 1) return [];
   const unique = [];
   for (const item of source) {
     let line = cleanText(item, 240)
       .replace(/^(?:line\s*\d+|lucy)\s*:\s*/i, "")
       .replace(/^[“\"']+|[”\"']+$/g, "")
       .trim();
+    if ((line.match(/[.!?](?:\s+|$)/g) || []).length > 1) continue;
     const words = line.split(/\s+/).filter(Boolean);
-    if (words.length > 20) line = `${words.slice(0, 20).join(" ").replace(/[,:;]$/, "")}.`;
+    if (words.length > 12) line = `${words.slice(0, 12).join(" ").replace(/[,:;]$/, "")}.`;
     if (words.length < 3 || /\b(?:going once|going twice|sold|passed)\b/i.test(line)) continue;
     if (!unique.some((existing) => existing.toLowerCase() === line.toLowerCase())) unique.push(line);
-    if (unique.length === 3) break;
+    if (unique.length === 1) break;
   }
-  return unique.length === 3 ? unique : [];
+  return unique.length === 1 ? unique : [];
 }
 
 export function parsePatterResponse(payload) {
@@ -100,8 +101,8 @@ export const PATTER_RESPONSE_FORMAT = Object.freeze({
     properties: {
       lines: {
         type: "array",
-        minItems: 3,
-        maxItems: 3,
+        minItems: 1,
+        maxItems: 1,
         items: { type: "string" }
       }
     },

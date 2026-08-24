@@ -116,9 +116,16 @@ export function chooseAutoBid(state, ceilingOverrides = null) {
   if (!candidates.length) return null;
   candidates.sort((a, b) => reactionScore(state, a.team.id) - reactionScore(state, b.team.id));
   const candidate = candidates[0];
+  const increment = Math.max(1, Number(state.config?.increment) || 1);
+  const availableSteps = 1 + Math.floor((candidate.ceiling - nextAmount) / increment);
+  const maximumJumpSteps = Math.min(3, availableSteps);
+  const jumpSteps = 1 + Math.min(
+    maximumJumpSteps - 1,
+    Math.floor(deterministicUnit(`${playerId}:${state.auction.bidCount}:${candidate.team.id}:jump`) * maximumJumpSteps)
+  );
   return {
     teamId: candidate.team.id,
-    amount: nextAmount,
+    amount: nextAmount + (jumpSteps - 1) * increment,
     ceiling: candidate.ceiling,
     intent: candidate.intent
   };
@@ -206,7 +213,13 @@ export function normalizeAutoIntents(state, decisions, { provider = "local", mod
 }
 
 export function autoBidDelayMs(state, teamId) {
-  return Math.round(520 + deterministicUnit(`${state.auction.playerId}:${state.auction.bidCount}:${teamId}:delay`) * 480);
+  const minimumDelayMs = 2_000;
+  const maximumDelayMs = 5_000;
+  return Math.round(
+    minimumDelayMs
+      + deterministicUnit(`${state.auction.playerId}:${state.auction.bidCount}:${teamId}:delay`)
+        * (maximumDelayMs - minimumDelayMs)
+  );
 }
 
 function rosterPositionCounts(state, team) {

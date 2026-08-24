@@ -163,7 +163,7 @@ export class RemotePhoneAudio {
     const energy = Math.min(3, Math.max(1, Number(performance.energy) || 2));
     const personalityRate = ({ classic: 0, hype: 0.08, pro: 0.05 })[performance.personality] || 0;
     const styleRate = performance.style === "countdown" ? -0.04 : ["bid", "patter"].includes(performance.style) ? 0.06 : performance.style === "roast" ? -0.02 : 0;
-    const speedRate = ({ measured: -0.12, normal: 0, fast: 0.12, fastest: 0.24 })[performance.speed] || 0;
+    const speedRate = ({ normal: 0, fast: 0.12, faster: 0.18, fastest: 0.24 })[performance.speed] || 0;
     utterance.rate = Number(Math.min(2, 1.03 + (energy - 2) * 0.08 + personalityRate + styleRate + speedRate).toFixed(2));
     utterance.pitch = performance.personality === "hype" ? 1.04 : performance.personality === "pro" ? 0.94 : 1;
     const voices = this.speechSynthesis.getVoices?.() || [];

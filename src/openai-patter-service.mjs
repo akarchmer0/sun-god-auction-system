@@ -34,7 +34,7 @@ export class OpenAIPatterService {
       message: available
         ? this.lastError
           ? `The AI Patter Director will retry automatically. ${this.lastError}`
-          : `OpenAI ${this.model} is directing three-line live patter arcs ahead of playback.`
+          : `OpenAI ${this.model} is directing single-phrase live patter ahead of playback.`
         : "Local live patter is active. Add OPENAI_API_KEY for the AI Patter Director."
     };
   }
@@ -54,7 +54,7 @@ export class OpenAIPatterService {
           model: this.model,
           instructions: buildPatterInstructions({ personality, energy }),
           input: buildPatterInput(context, recentLines),
-          max_output_tokens: 260,
+          max_output_tokens: 100,
           reasoning: { effort: "none" },
           store: false,
           text: { verbosity: "low", format: PATTER_RESPONSE_FORMAT }
@@ -67,7 +67,7 @@ export class OpenAIPatterService {
         return { lines: [], provider: "local", model: null };
       }
       const lines = parsePatterResponse(payload);
-      if (lines.length !== 3) {
+      if (lines.length !== 1) {
         this.#reportError("OpenAI returned an invalid patter queue.");
         return { lines: [], provider: "local", model: null };
       }

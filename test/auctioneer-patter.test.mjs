@@ -17,17 +17,14 @@ test("patter is limited to active bidding and countdown phases", () => {
   for (const phase of ["idle", "ready", "paused", "sold", "passed"]) assert.equal(isLiveAuctionPhase(phase), false);
 });
 
-test("available patter lines become one long, normalized TTS passage", () => {
+test("patter playback uses at most one phrase", () => {
   const passage = buildPatterPassage([
     "  Twenty-eight has the room.  ",
     "Every budget is watching.\nClosely.",
     "Who brings twenty-nine?"
   ]);
-  assert.equal(
-    passage.text,
-    "Twenty-eight has the room. Every budget is watching. Closely. Who brings twenty-nine?"
-  );
-  assert.equal(passage.lines.length, 3);
+  assert.equal(passage.text, "Twenty-eight has the room.");
+  assert.deepEqual(passage.lines, ["Twenty-eight has the room."]);
 });
 
 test("patter passages stay within the provider transcript budget", () => {

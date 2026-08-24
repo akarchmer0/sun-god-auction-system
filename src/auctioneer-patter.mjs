@@ -4,8 +4,8 @@ const DELAY_PATTERNS = Object.freeze({
   3: Object.freeze([160, 90, 230])
 });
 
-export const PATTER_PASSAGE_MAX_CHARS = 1_400;
-export const LOCAL_PATTER_PASSAGE_LINES = 3;
+export const PATTER_PASSAGE_MAX_CHARS = 180;
+export const LOCAL_PATTER_PASSAGE_LINES = 1;
 
 export function patterDelayMs({ energy = 2, sequence = 0 } = {}) {
   const level = Math.min(3, Math.max(1, Number(energy) || 2));
@@ -29,6 +29,7 @@ export function buildPatterPassage(lines, maxCharacters = PATTER_PASSAGE_MAX_CHA
     if (candidate.length > limit) break;
     passageLines.push(line);
     seen.add(line.toLowerCase());
+    break;
   }
   return { text: passageLines.join(" "), lines: passageLines };
 }

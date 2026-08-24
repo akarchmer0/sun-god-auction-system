@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDraft, nominatePlayer, openAuction, placeBid, maxBidForTeam } from "../src/domain.mjs";
 import {
   buildAutoIntentContext,
+  autoBidDelayMs,
   calculateAutoBidCeiling,
   chooseAutoBid,
   chooseAutoNomination,
@@ -94,15 +95,37 @@ test("Yahoo average remains context and does not replace the opponent suggested-
   assert.equal(marketCeiling, projectedCeiling);
 });
 
-test("auto bidders raise by only the next legal increment", () => {
+test("auto bidders make varied legal jumps without exceeding their ceiling", () => {
   let state = openAuction(nominatePlayer(draft(), "runner"));
   state.auction.autoIntents = {
     a: { intent: "pass", reason: "roster_balance" },
     b: { intent: "value", reason: "value_opportunity" }
   };
-  const decision = chooseAutoBid(state);
-  assert.equal(decision.amount, 2);
-  assert.ok(decision.ceiling > decision.amount);
+  const amounts = Array.from({ length: 16 }, (_, bidCount) => chooseAutoBid({
+    ...state,
+    auction: { ...state.auction, bidCount }
+  }, { b: 20 }).amount);
+
+  assert.ok(amounts.every((amount) => amount >= 2 && amount <= 4));
+  assert.ok(amounts.some((amount) => amount > 2));
+  assert.ok(new Set(amounts).size > 1);
+
+  state.auction.amount = 19;
+  const finalDecision = chooseAutoBid(state, { b: 20 });
+  assert.equal(finalDecision.amount, 20);
+  assert.equal(finalDecision.ceiling, 20);
+});
+
+test("auto bidders wait a varied few seconds before reacting", () => {
+  const state = openAuction(nominatePlayer(draft(), "runner"));
+  const delays = Array.from({ length: 12 }, (_, bidCount) => autoBidDelayMs({
+    ...state,
+    auction: { ...state.auction, bidCount }
+  }, "b"));
+
+  assert.ok(delays.every((delay) => delay >= 2_000 && delay <= 5_000));
+  assert.ok(new Set(delays).size > 1);
+  assert.equal(autoBidDelayMs(state, "b"), autoBidDelayMs(state, "b"));
 });
 
 test("a passing auto nominator remains committed at one dollar but never raises", () => {
@@ -129,7 +152,7 @@ test("structured intents are accepted only for auto teams and known enums", () =
   assert.equal(intents.stranger, undefined);
 });
 
-test("two auto teams bid one increment at a time and stop at their frozen maximums", () => {
+test("two auto teams make bounded jumps and stop at their frozen maximums", () => {
   let state = openAuction(nominatePlayer(draft(), "runner"));
   state.auction.autoIntents = {
     a: { intent: "target", reason: "required_position" },
@@ -138,7 +161,9 @@ test("two auto teams bid one increment at a time and stop at their frozen maximu
   let bids = 0;
   while (chooseAutoBid(state)) {
     const decision = chooseAutoBid(state);
-    assert.equal(decision.amount, state.auction.amount + 1);
+    assert.ok(decision.amount >= state.auction.amount + 1);
+    assert.ok(decision.amount <= state.auction.amount + 3);
+    assert.ok(decision.amount <= decision.ceiling);
     state = placeBid(state, decision.teamId, decision.amount);
     bids += 1;
     assert.ok(bids < 100, "auto bidders should terminate");

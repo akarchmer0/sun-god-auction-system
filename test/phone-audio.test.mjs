@@ -74,6 +74,27 @@ test("phone sound toggle confirms locally and speaks relayed transcripts", async
   assert.equal(spoken.at(-1).text, "Going once");
 });
 
+test("phone fallback honors the intermediate Faster pace", async () => {
+  const spoken = [];
+  class FakeUtterance { constructor(text) { this.text = text; } }
+  const player = new RemotePhoneAudio({
+    AudioContextImpl: FakeAudioContext,
+    speechSynthesisImpl: { cancel() {}, getVoices() { return []; }, speak(value) { spoken.push(value); } },
+    UtteranceImpl: FakeUtterance,
+    storage: { getItem() { return null; }, setItem() {} }
+  });
+
+  await player.toggle();
+  player.handleControl({
+    type: "speech.fallback",
+    speechId: "speech_faster",
+    transcript: "New bid",
+    performance: { style: "neutral", personality: "classic", energy: 2, speed: "faster" }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(spoken.at(-1).rate > 1.15);
+});
+
 test("browser TTS works without Web Audio and retains the active utterance", async () => {
   const spoken = [];
   class FakeUtterance { constructor(text) { this.text = text; } }

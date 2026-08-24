@@ -1,5 +1,5 @@
 import { SPEECH_PROVIDER_IDS, speechProviderStatus } from "./auctioneer-speech-providers.mjs";
-import { auctioneerSpeedOffset, normalizeAuctioneerSpeed } from "./auctioneer-speed.mjs";
+import { auctioneerSpeedOffset, normalizeAuctioneerSpeed, realtimePlaybackRate } from "./auctioneer-speed.mjs";
 
 export class AuctioneerVoice {
   constructor({
@@ -199,6 +199,8 @@ export class AuctioneerVoice {
     if (this.active !== active) return;
     if (event.type === "start") {
       active.sampleRate = Number(event.sampleRate) || 24_000;
+      active.provider = event.provider || this.status.provider;
+      active.playbackRate = realtimePlaybackRate(active.provider, active.performance.speed);
       active.remoteStarted = true;
       this.#emitPlayback({
         type: "start",
@@ -237,10 +239,11 @@ export class AuctioneerVoice {
   #schedulePcm(base64, sampleRate, active) {
     const samples = decodePcm16(base64);
     if (!samples.length || this.active !== active) return;
+    const compressedSamples = timeCompressPcm(samples, active.playbackRate);
     if (!this.audioContext) this.audioContext = new this.AudioContextImpl({ sampleRate });
     if (this.audioContext.state === "suspended") void this.audioContext.resume();
-    const buffer = this.audioContext.createBuffer(1, samples.length, sampleRate);
-    buffer.copyToChannel(samples, 0);
+    const buffer = this.audioContext.createBuffer(1, compressedSamples.length, sampleRate);
+    buffer.copyToChannel(compressedSamples, 0);
     const source = this.audioContext.createBufferSource();
     source.buffer = buffer;
     source.connect(this.audioContext.destination);
@@ -353,4 +356,70 @@ export function decodePcm16(base64) {
     samples[index] = (signed & 0x8000 ? signed - 0x10000 : signed) / 32768;
   }
   return samples;
+}
+
+export function timeCompressPcm(samples, requestedRate = 1) {
+  const input = samples instanceof Float32Array ? samples : Float32Array.from(samples || []);
+  const rate = Math.min(1.5, Math.max(1, Number(requestedRate) || 1));
+  const frameSize = 480;
+  const overlap = frameSize / 2;
+  if (rate <= 1.001 || input.length < frameSize * 2) return input;
+
+  const synthesisHop = overlap;
+  const analysisHop = synthesisHop * rate;
+  const searchRadius = 60;
+  const output = new Float32Array(input.length + frameSize);
+  output.set(input.subarray(0, frameSize));
+  let previousInputPosition = 0;
+  let outputPosition = synthesisHop;
+  let outputEnd = frameSize;
+
+  while (true) {
+    const expectedPosition = Math.round(previousInputPosition + analysisHop);
+    const minimumPosition = Math.max(previousInputPosition + synthesisHop, expectedPosition - searchRadius);
+    const maximumPosition = Math.min(input.length - frameSize, expectedPosition + searchRadius);
+    if (minimumPosition > maximumPosition) break;
+
+    const inputPosition = bestOverlapPosition(
+      input,
+      previousInputPosition + synthesisHop,
+      minimumPosition,
+      maximumPosition,
+      overlap
+    );
+    for (let index = 0; index < overlap; index += 1) {
+      const mix = (index + 1) / (overlap + 1);
+      output[outputPosition + index] = output[outputPosition + index] * (1 - mix)
+        + input[inputPosition + index] * mix;
+    }
+    output.set(input.subarray(inputPosition + overlap, inputPosition + frameSize), outputPosition + overlap);
+    previousInputPosition = inputPosition;
+    outputEnd = outputPosition + frameSize;
+    outputPosition += synthesisHop;
+  }
+
+  return output.slice(0, outputEnd);
+}
+
+function bestOverlapPosition(input, referencePosition, minimumPosition, maximumPosition, overlap) {
+  let bestPosition = minimumPosition;
+  let bestScore = -Infinity;
+  for (let candidate = minimumPosition; candidate <= maximumPosition; candidate += 2) {
+    let correlation = 0;
+    let candidateEnergy = 0;
+    let referenceEnergy = 0;
+    for (let index = 0; index < overlap; index += 1) {
+      const reference = input[referencePosition + index];
+      const value = input[candidate + index];
+      correlation += reference * value;
+      referenceEnergy += reference * reference;
+      candidateEnergy += value * value;
+    }
+    const score = correlation / Math.sqrt(Math.max(Number.EPSILON, referenceEnergy * candidateEnergy));
+    if (score > bestScore) {
+      bestScore = score;
+      bestPosition = candidate;
+    }
+  }
+  return bestPosition;
 }

@@ -10,13 +10,9 @@ test("unconfigured Patter Director leaves local patter active", async () => {
   assert.deepEqual(await service.createPatter({ context }), { lines: [], provider: "local", model: null });
 });
 
-test("configured Patter Director requests a strict three-line queue", async () => {
+test("configured Patter Director requests one short phrase", async () => {
   let request;
-  const lines = [
-    "Twenty-eight dollars and this room is shaking.",
-    "Ari holds the lead but every budget is watching.",
-    "Who brings twenty-nine and keeps this alive?"
-  ];
+  const lines = ["Who brings twenty-nine and keeps this alive?"];
   const service = new OpenAIPatterService({
     apiKey: "test-key",
     model: "gpt-test",
@@ -32,7 +28,8 @@ test("configured Patter Director requests a strict three-line queue", async () =
   assert.deepEqual(request.body.reasoning, { effort: "none" });
   assert.equal(request.body.text.verbosity, "low");
   assert.equal(request.body.text.format.type, "json_schema");
-  assert.equal(request.body.text.format.schema.properties.lines.minItems, 3);
+  assert.equal(request.body.text.format.schema.properties.lines.minItems, 1);
+  assert.equal(request.body.text.format.schema.properties.lines.maxItems, 1);
   assert.match(request.body.input, /Old line/);
   assert.deepEqual(result.lines, lines);
   assert.equal(result.provider, "openai");
