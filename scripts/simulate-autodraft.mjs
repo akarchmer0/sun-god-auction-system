@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { makeTeams } from "../src/data.mjs";
 import { fantasyProsPlayers } from "../src/fantasy-pros-data.mjs";
 import { parseCsv, playersFromMappedCsv, suggestCsvMapping, buildResultsPayload } from "../src/draft-io.mjs";
-import { advanceCountdown, canTeamRosterPlayer, createDraft, maxBidForTeam, nominatePlayer, openAuction, placeBid, ROSTER_POSITIONS } from "../src/domain.mjs";
+import { advanceCountdown, AUTO_ROSTER_REQUIREMENTS, canTeamRosterPlayer, createDraft, maxBidForTeam, nominatePlayer, openAuction, placeBid, ROSTER_POSITIONS } from "../src/domain.mjs";
 import {
   buildAutoIntentContext,
   calculateAutoBidCeiling,
@@ -20,7 +20,7 @@ import { applyYahooMarketValues, parseYahooMarketValues } from "../src/yahoo-mar
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SAVED_DRAFT_PATH = join(homedir(), "Library", "Application Support", "Sun God Auctioneer", "current.json");
-const STANDARD_REQUIREMENTS = Object.freeze({ QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DST: 1 });
+const STANDARD_REQUIREMENTS = AUTO_ROSTER_REQUIREMENTS;
 const DEFAULT_OUTPUT = resolve(ROOT, "artifacts/autodraft-simulation.html");
 const HELP = `Sun God autodraft simulation
 
@@ -42,7 +42,7 @@ Options:
   --budget <dollars>       Override the budget per team
   --roster-size <count>    Override players per team
   --increment <dollars>    Override the legal bid increment
-  --requirements <list>   Example: QB=1,RB=2,WR=3,TE=1,FLEX=1,K=1,DST=1
+  --requirements <list>   Example: QB=2,RB=4,WR=5,TE=2,FLEX=0,K=1,DST=1
   --seed <text>            Stable simulation seed (default: fantasypros-1)
   --mode <auto|ai|local>   Auto uses OpenAI when OPENAI_API_KEY exists (default: auto)
   --model <name>           Override OPENAI_AUTODRAFT_MODEL

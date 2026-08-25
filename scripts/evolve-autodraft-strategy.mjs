@@ -55,7 +55,7 @@ Options:
   --budget <dollars>          Override budget per team
   --roster-size <count>       Override players per team
   --increment <dollars>       Override bid increment
-  --requirements <list>      Example: QB=1,RB=2,WR=3,TE=1,FLEX=1,K=1,DST=1
+  --requirements <list>      Example: QB=2,RB=4,WR=5,TE=2,FLEX=0,K=1,DST=1
   --help                      Show this message
 `;
 

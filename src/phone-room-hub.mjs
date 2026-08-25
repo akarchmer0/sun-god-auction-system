@@ -232,6 +232,7 @@ function normalizeAuction(auction) {
     amount: boundedNumber(auction?.amount),
     nextBid: boundedNumber(auction?.nextBid),
     highBidderId: auction?.highBidderId ? cleanId(auction.highBidderId, 80) : null,
+    countdownEndsAt: boundedTimestamp(auction?.countdownEndsAt),
     acceptingBids: Boolean(auction?.acceptingBids),
     player: auction?.player ? {
       id: cleanId(auction.player.id, 100),
@@ -270,6 +271,11 @@ function cleanNflTeam(value) {
 function boundedNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 && number <= 100_000 ? Math.round(number) : 0;
+}
+
+function boundedTimestamp(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp >= 0 && timestamp <= 4_000_000_000_000 ? Math.round(timestamp) : 0;
 }
 
 function roomError(message, status) {

@@ -1,6 +1,7 @@
 export const MIN_BID = 1;
 
 export const ROSTER_POSITIONS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
+export const AUTO_ROSTER_REQUIREMENTS = Object.freeze({ QB: 2, RB: 4, WR: 5, TE: 2, FLEX: 0, K: 1, DST: 1 });
 export const DEFAULT_COUNTDOWN_SECONDS = Object.freeze({ once: 5.2, twice: 4.2 });
 
 export function createDraft({
@@ -95,7 +96,15 @@ export function canTeamRosterPlayer(state, teamId, playerId) {
   if (!team || !player || team.roster.length >= state.config.rosterSize) return false;
   const rosterAfterPurchase = [...team.roster, { playerId: player.id, price: 0 }];
   const openSlots = state.config.rosterSize - rosterAfterPurchase.length;
-  return missingRequiredSlots(state, rosterAfterPurchase) <= openSlots;
+  return missingRequiredSlots(state, rosterAfterPurchase, rosterRequirementsForTeam(state, team)) <= openSlots;
+}
+
+export function rosterRequirementsForTeam(state, team) {
+  const autoRosterSize = Object.values(AUTO_ROSTER_REQUIREMENTS).reduce((sum, count) => sum + count, 0);
+  if (team?.controller?.type === "auto" && Number(state?.config?.rosterSize) === autoRosterSize) {
+    return { ...AUTO_ROSTER_REQUIREMENTS };
+  }
+  return normalizeRosterRequirements(state?.config?.rosterRequirements);
 }
 
 export function nominatePlayer(state, playerId) {
@@ -312,8 +321,7 @@ export function currentPlayer(state) {
   return state.players.find((item) => item.id === state.auction.playerId) || null;
 }
 
-function missingRequiredSlots(state, roster) {
-  const requirements = normalizeRosterRequirements(state.config.rosterRequirements);
+function missingRequiredSlots(state, roster, requirements = normalizeRosterRequirements(state.config.rosterRequirements)) {
   const counts = new Map();
   for (const spot of roster) {
     const position = state.players.find((player) => player.id === spot.playerId)?.position?.toUpperCase();

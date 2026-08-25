@@ -1,4 +1,4 @@
-import { canTeamRosterPlayer, maxBidForTeam, nextLegalBidAmount, ROSTER_POSITIONS } from "./domain.mjs";
+import { canTeamRosterPlayer, maxBidForTeam, nextLegalBidAmount, rosterRequirementsForTeam, ROSTER_POSITIONS } from "./domain.mjs";
 
 export const AUTO_INTENTS = Object.freeze(["pass", "discount", "value", "target"]);
 export const AUTO_INTENT_REASONS = Object.freeze([
@@ -45,7 +45,7 @@ export function localAutoIntent(state, teamId, playerId = state?.auction?.player
 
   const counts = rosterPositionCounts(state, team);
   const position = normalizePosition(player.position);
-  const requirements = normalizedRequirements(state);
+  const requirements = normalizedRequirements(state, team);
   const openSlots = Math.max(0, Number(state.config?.rosterSize) - team.roster.length);
   const missingAtPosition = Math.max(0, requirements[position] - (counts[position] || 0));
   const flexMissing = missingFlexSlots(requirements, counts);
@@ -231,8 +231,9 @@ function rosterPositionCounts(state, team) {
   return counts;
 }
 
-function normalizedRequirements(state) {
-  return Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Math.max(0, wholeNumber(state.config?.rosterRequirements?.[position]))]));
+function normalizedRequirements(state, team = state?.teams?.find(isAutoTeam)) {
+  const requirements = rosterRequirementsForTeam(state, team);
+  return Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Math.max(0, wholeNumber(requirements?.[position]))]));
 }
 
 function missingFlexSlots(requirements, counts) {

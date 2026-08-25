@@ -223,17 +223,20 @@ export class AuctionRoom {
     }
     if (message.type === "bid.submit") {
       if (!this.#hostConnected()) throw new Error("The commissioner is offline; bids are paused.");
-      if (!attachment.teamId || this.claims[attachment.teamId] !== attachment.participantTokenHash) throw new Error("Claim a team before bidding.");
+      const teamId = cleanId(message.teamId || attachment.teamId);
+      const participantTokenHash = await hash(message.participantToken);
+      if (this.claims[teamId] !== participantTokenHash) throw new Error("Claim a team before bidding.");
       if (!this.snapshot?.auction?.acceptingBids) throw new Error("Bidding is not open.");
-      const amount = Number(message.amount);
+      const bidMode = message.bidMode === "next" ? "next" : "custom";
+      const amount = bidMode === "next" ? Number(this.snapshot.auction.nextBid) : Number(message.amount);
       if (!Number.isInteger(amount) || amount < Number(this.snapshot.auction.nextBid)) throw new Error("Bid amount is not legal.");
-      const team = this.snapshot.teams.find((item) => item.id === attachment.teamId);
+      const team = this.snapshot.teams.find((item) => item.id === teamId);
       if (!team || amount > Number(team.maxBid)) throw new Error("Bid exceeds the team maximum.");
       const receivedAt = Date.now();
       if (receivedAt - Number(attachment.lastBidAt || 0) < 200) throw new Error("Bid already received.");
-      socket.serializeAttachment({ ...attachment, lastBidAt: receivedAt });
-      this.#send(socket, createRoomMessage("bid.received", { amount, receivedAt, replyTo: message.messageId }, { roomRevision: this.revision }));
-      return this.#broadcast(createRoomMessage("bid.proposed", { teamId: attachment.teamId, amount, receivedAt, participantMessageId: message.messageId }, { roomRevision: this.revision }), "host");
+      socket.serializeAttachment({ ...attachment, teamId, participantTokenHash, lastBidAt: receivedAt });
+      this.#send(socket, createRoomMessage("bid.received", { amount, bidMode, receivedAt, replyTo: message.messageId }, { roomRevision: this.revision }));
+      return this.#broadcast(createRoomMessage("bid.proposed", { teamId, amount, bidMode, receivedAt, participantMessageId: message.messageId }, { roomRevision: this.revision }), "host");
     }
     throw new Error("Participant message is not allowed.");
   }

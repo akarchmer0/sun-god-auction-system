@@ -15,6 +15,10 @@ let roomTransport = roomId ? new LanRoomTransport({ roomId }) : null;
 let activePhoneTab = "auction";
 let viewedRosterTeamId = selectedTeamId;
 let rosterPickerOpen = false;
+let customBidAmount = null;
+let customBidLotKey = null;
+let customBidDragging = false;
+let phoneCountdownTimer = null;
 
 localStorage.setItem(TOKEN_KEY, participantToken);
 render();
@@ -85,6 +89,18 @@ function wireEvents() {
       showMessage(error.message, "error");
     }
   });
+
+  app.addEventListener("input", (event) => {
+    if (!event.target.matches('#custom-bid-form input[name="amount"]')) return;
+    customBidAmount = Number(event.target.value);
+    updateCustomBidTuner(event.target);
+  });
+
+  app.addEventListener("pointerdown", (event) => {
+    if (event.target.matches('#custom-bid-form input[name="amount"]')) customBidDragging = true;
+  });
+  window.addEventListener("pointerup", () => { customBidDragging = false; });
+  window.addEventListener("pointercancel", () => { customBidDragging = false; });
 }
 
 async function loadRoom() {
@@ -182,6 +198,7 @@ async function refreshRoom() {
 }
 
 function render() {
+  clearPhoneCountdown();
   if (status === "code") return renderCodeEntry();
   if (status === "loading") return renderLoading();
   if (status === "error") return renderError();
@@ -189,11 +206,117 @@ function render() {
   renderBidder();
 }
 
+function clearPhoneCountdown() {
+  if (phoneCountdownTimer) window.clearInterval(phoneCountdownTimer);
+  phoneCountdownTimer = null;
+}
+
+function startPhoneCountdown(auction) {
+  const countdownValue = app.querySelector("[data-phone-countdown-value]");
+  const countdownEndsAt = Number(auction?.countdownEndsAt);
+  if (!countdownValue || !Number.isFinite(countdownEndsAt) || countdownEndsAt <= 0) return;
+  const updateCountdown = () => {
+    const secondsRemaining = Math.max(0, countdownEndsAt - Date.now()) / 1_000;
+    countdownValue.textContent = secondsRemaining.toFixed(1);
+  };
+  updateCountdown();
+  phoneCountdownTimer = window.setInterval(updateCountdown, 100);
+}
+
 function renderShell(content, className = "") {
-  app.innerHTML = `<main class="bidder-shell ${className}">
+  renderAppHtml(`<main class="bidder-shell ${className}">
     <header><span class="phone-sun">${sunLogo()}</span><span><strong>Sun God</strong><small>AUCTION SYSTEMS</small></span><i class="connection-dot ${message === "Connected" ? "is-live" : ""}"></i></header>
     ${content}
-  </main>`;
+  </main>`);
+}
+
+function renderAppHtml(html) {
+  const customBidInput = app.querySelector('#custom-bid-form input[name="amount"]');
+  const preserveCustomBid = customBidInput && (customBidDragging || document.activeElement === customBidInput);
+  if (!preserveCustomBid) {
+    app.innerHTML = html;
+    return;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  if (!template.content.querySelector('#custom-bid-form input[name="amount"]')) {
+    app.innerHTML = html;
+    return;
+  }
+  // Reconcile live auction updates without detaching a tuner that is being dragged.
+  patchDomChildren(app, template.content);
+}
+
+function updateCustomBidTuner(input) {
+  const form = input.closest("#custom-bid-form");
+  const amount = Number(input.value);
+  const minimum = Number(input.min);
+  const maximum = Number(input.max);
+  const progress = maximum > minimum ? ((amount - minimum) / (maximum - minimum)) * 100 : 100;
+  input.style.setProperty("--bid-progress", `${progress}%`);
+  input.setAttribute("aria-valuetext", `$${amount}`);
+  const output = form?.querySelector("output");
+  const button = form?.querySelector("button");
+  if (output) output.textContent = `$${amount}`;
+  if (button) button.textContent = `Place $${amount} bid`;
+}
+
+function patchDomChildren(currentParent, nextParent) {
+  const nextChildren = [...nextParent.childNodes];
+  let index = 0;
+  while (index < nextChildren.length) {
+    const currentChild = currentParent.childNodes[index];
+    const nextChild = nextChildren[index];
+    if (!currentChild) {
+      currentParent.append(nextChild.cloneNode(true));
+      index += 1;
+      continue;
+    }
+    if (sameDomKind(currentChild, nextChild)) {
+      patchDomNode(currentChild, nextChild);
+      index += 1;
+      continue;
+    }
+
+    const laterNextMatch = nextChildren.slice(index + 1).findIndex((candidate) => sameDomKind(currentChild, candidate));
+    if (laterNextMatch >= 0) {
+      currentParent.insertBefore(nextChild.cloneNode(true), currentChild);
+      index += 1;
+      continue;
+    }
+    const laterCurrentMatch = [...currentParent.childNodes].slice(index + 1).findIndex((candidate) => sameDomKind(candidate, nextChild));
+    if (laterCurrentMatch >= 0) {
+      currentChild.remove();
+      continue;
+    }
+    currentChild.replaceWith(nextChild.cloneNode(true));
+    index += 1;
+  }
+  while (currentParent.childNodes.length > nextChildren.length) currentParent.lastChild.remove();
+}
+
+function patchDomNode(currentNode, nextNode) {
+  if (currentNode.nodeType !== 1) {
+    if (currentNode.nodeValue !== nextNode.nodeValue) currentNode.nodeValue = nextNode.nodeValue;
+    return;
+  }
+  for (const attribute of [...currentNode.attributes]) {
+    if (!nextNode.hasAttribute(attribute.name)) currentNode.removeAttribute(attribute.name);
+  }
+  for (const attribute of [...nextNode.attributes]) {
+    if (currentNode.getAttribute(attribute.name) !== attribute.value) currentNode.setAttribute(attribute.name, attribute.value);
+  }
+  patchDomChildren(currentNode, nextNode);
+}
+
+function sameDomKind(left, right) {
+  if (left.nodeType !== right.nodeType) return false;
+  if (left.nodeType !== 1) return true;
+  if (left.tagName !== right.tagName) return false;
+  const leftId = left.getAttribute("id");
+  const rightId = right.getAttribute("id");
+  return !leftId && !rightId || leftId === rightId;
 }
 
 function renderCodeEntry() {
@@ -232,6 +355,17 @@ function renderBidder() {
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
   const hasRosterFit = team.eligibleForPlayer !== false;
   const canBid = auction.acceptingBids && !hasHighBid && canAfford && hasRosterFit && !sendingBid;
+  const customBidMinimum = Number(auction.nextBid || 1);
+  const customBidMaximum = Math.max(customBidMinimum, Number(team.maxBid || 0));
+  const nextCustomBidLotKey = `${player?.id || "waiting"}:${selectedTeamId}`;
+  if (customBidLotKey !== nextCustomBidLotKey) {
+    customBidLotKey = nextCustomBidLotKey;
+    customBidAmount = customBidMinimum;
+  }
+  customBidAmount = Math.min(customBidMaximum, Math.max(customBidMinimum, Number(customBidAmount) || customBidMinimum));
+  const customBidProgress = customBidMaximum > customBidMinimum
+    ? ((customBidAmount - customBidMinimum) / (customBidMaximum - customBidMinimum)) * 100
+    : 100;
   const easyBids = easyBidAmounts({
     currentBid: auction.amount,
     nextBid: auction.nextBid,
@@ -252,7 +386,9 @@ function renderBidder() {
   const rosterTeam = room.teams.find((item) => item.id === viewedRosterTeamId) || team;
   viewedRosterTeamId = rosterTeam.id;
   const roster = Array.isArray(rosterTeam.roster) ? rosterTeam.roster : [];
+  const showCountdown = ["once", "twice"].includes(auction.phase);
   const auctionTab = `<div class="phone-lot ${player ? "" : "is-empty"}">
+      ${showCountdown ? `<div class="phone-countdown" role="timer" aria-label="${escapeHtml(phaseLabel(auction.phase))} countdown"><span>TIME LEFT</span><strong data-phone-countdown-value>—</strong><small>SECONDS</small></div>` : ""}
       <span class="kicker">${player ? `${escapeHtml(player.position)} · ${escapeHtml(player.nflTeam)}` : "AUCTION ROOM"}</span>
       <h1>${player ? escapeHtml(player.name) : "Waiting for a player"}</h1>
       <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : hasAnyBid ? "CURRENT BID" : "OPENING BID"}</small><strong><sup>$</sup>${Number(auction.amount || 1)}</strong>${highBidder ? `<div class="phone-bid-holder" style="--bid-holder:${highBidder.color}"><i></i><span><small>HELD BY</small><b>${escapeHtml(highBidder.name)}</b></span><em>${escapeHtml(highBidder.manager)}</em></div>` : ""}</div>
@@ -263,8 +399,12 @@ function renderBidder() {
       <div class="phone-bid-tools-head"><span><small>EASY BIDS</small><strong>Jump the price</strong></span>${player?.suggestedValue ? `<b>SUGGESTED $${Number(player.suggestedValue)}</b>` : ""}</div>
       ${easyBids.length ? `<div class="easy-bid-grid">${easyBids.map((amount) => `<button data-action="bid" data-amount="${amount}" ${canBid ? "" : "disabled"}><small>EASY BID</small><strong>$${amount}</strong></button>`).join("")}</div>` : `<p class="no-easy-bids">No useful round-number jumps remain below the suggested value.</p>`}
       <form id="custom-bid-form" class="custom-bid-form">
-        <label><span>$</span><input name="amount" type="number" inputmode="numeric" min="${Number(auction.nextBid || 1)}" max="${Number(team.maxBid || 0)}" step="1" placeholder="${Number(auction.nextBid || 1)}" aria-label="Custom bid amount" ${canBid ? "" : "disabled"} required /></label>
-        <button ${canBid ? "" : "disabled"}>Place custom bid</button>
+        <div class="custom-bid-tuner">
+          <div><span>DRAG TO SET BID</span><output name="custom-bid-output">$${customBidAmount}</output></div>
+          <input name="amount" type="range" min="${customBidMinimum}" max="${customBidMaximum}" value="${customBidAmount}" step="1" aria-label="Custom bid amount" aria-valuetext="$${customBidAmount}" style="--bid-progress:${customBidProgress}%" ${canBid ? "" : "disabled"} />
+          <small><span>$${customBidMinimum} MIN</span><span>$${customBidMaximum} MAX</span></small>
+        </div>
+        <button ${canBid ? "" : "disabled"}>Place $${customBidAmount} bid</button>
       </form>
     </section>
     <div class="phone-budget"><span><small>BUDGET</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>ROSTER</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>`;
@@ -282,6 +422,7 @@ function renderBidder() {
     <nav class="phone-tabs" aria-label="Bidder views"><button class="${activePhoneTab === "auction" ? "is-active" : ""}" data-action="show-tab" data-tab="auction">Auction</button><button class="${activePhoneTab === "roster" ? "is-active" : ""}" data-action="show-tab" data-tab="roster">Roster <b>${roster.length}</b></button></nav>
     ${activePhoneTab === "roster" ? rosterTab : auctionTab}
   </section>`);
+  if (activePhoneTab === "auction") startPhoneCountdown(auction);
 }
 
 function showMessage(nextMessage, kind = "") {

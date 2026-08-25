@@ -34,6 +34,9 @@ test("remote bidder exposes auction, roster, and completed-auction history views
   assert.match(html, /family=DM\+Mono/);
   assert.match(client, /easyBidAmounts/);
   assert.match(client, /RelayRoomTransport/);
+  assert.match(client, /bidMode = requestedAmount == null \? "next" : "custom"/);
+  assert.match(client, /claim a team before bidding/);
+  assert.match(client, /await roomTransport\.claimTeam\(\{ teamId: selectedTeamId, participantToken \}\)/);
   assert.match(client, /RemotePhoneAudio/);
   assert.match(client, /data-action="toggle-sound"/);
   assert.match(client, /class="easy-bid-grid"/);
@@ -46,10 +49,19 @@ test("remote bidder exposes auction, roster, and completed-auction history views
   assert.match(client, /class="league-call-link"/);
   assert.doesNotMatch(localClient, /data-tab="history"/);
   assert.match(hostClient, /history: buildPhoneAuctionHistory\(state\)/);
+  assert.match(hostClient, /countdownEndsAt:/);
+  assert.match(hostClient, /bid\.bidMode === "next" \? nextVisualBidAmount\(state\)/);
   for (const bidderClient of [localClient, client]) {
     assert.match(bidderClient, /class="phone-bid-holder"/);
     assert.match(bidderClient, /HELD BY/);
     assert.match(bidderClient, /highBidder\.name/);
+    assert.match(bidderClient, /type="range"/);
+    assert.match(bidderClient, /customBidLotKey/);
+    assert.match(bidderClient, /customBidDragging/);
+    assert.match(bidderClient, /data-phone-countdown-value/);
+    assert.match(bidderClient, /startPhoneCountdown\(auction\)/);
+    assert.match(bidderClient, /Math\.max\(customBidMinimum/);
+    assert.doesNotMatch(bidderClient, /inputmode="numeric"/);
     assert.match(bidderClient, /data-action="toggle-roster-picker"/);
     assert.match(bidderClient, /data-action="view-roster"/);
     assert.match(bidderClient, /const rosterTeam = room\.teams\.find/);

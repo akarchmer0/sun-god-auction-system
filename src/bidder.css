@@ -52,7 +52,10 @@ button { color: inherit; }
 .phone-tabs button.is-active { background: #17130e; color: #f6eedc; }
 .phone-tabs button b { min-width: 17px; height: 17px; margin-left: 5px; border: 1px solid currentColor; border-radius: 9px; display: inline-grid; place-items: center; font: 600 7px/1 "DM Mono", monospace; }
 .league-call-link { min-height: 42px; margin-top: 9px; border: 1px solid #211c15; border-radius: 7px; display: grid; place-items: center; background: #fff9ed; color: #17130e; font-size: 10px; font-weight: 800; text-decoration: none; }
-.phone-lot { flex: 1; min-height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.phone-lot { position: relative; flex: 1; min-height: 250px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.phone-countdown { position: absolute; right: 0; bottom: 10px; min-width: 105px; display: flex; flex-direction: column; align-items: flex-end; color: #d72d24; font-family: "DM Mono", monospace; text-align: right; }
+.phone-countdown span, .phone-countdown small { color: #a5261d; font-size: 7px; font-weight: 600; line-height: 1; letter-spacing: .14em; }
+.phone-countdown strong { margin: 4px -2px 2px 0; font-size: clamp(42px, 14vw, 58px); font-weight: 500; line-height: .84; letter-spacing: -.09em; font-variant-numeric: tabular-nums; }
 .phone-lot h1 { max-width: 340px; margin: 9px 0 20px; font-size: clamp(38px, 12vw, 62px); line-height: .94; letter-spacing: -.065em; }
 .phone-price small { display: block; color: #746a5a; font: 600 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
 .phone-price strong { display: block; margin-top: 3px; font-size: 78px; line-height: .95; letter-spacing: -.07em; }
@@ -83,10 +86,18 @@ button { color: inherit; }
 .easy-bid-grid small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .1em; }
 .easy-bid-grid strong { margin-top: 4px; font-size: 19px; }
 .no-easy-bids { margin: 11px 0 0; color: #746a5a; font-size: 9px; line-height: 1.4; }
-.custom-bid-form { margin-top: 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.custom-bid-form label { height: 49px; border: 1px solid #211c15; border-radius: 7px; display: flex; align-items: center; background: #f6eedc; overflow: hidden; }
-.custom-bid-form label span { padding-left: 12px; color: #746a5a; font: 700 16px/1 "DM Mono", monospace; }
-.custom-bid-form input { width: 100%; height: 100%; min-width: 0; padding: 0 10px 0 4px; border: 0; background: transparent; color: #17130e; font: 700 20px/1 "DM Mono", monospace; outline: 0; }
+.custom-bid-form { margin-top: 9px; display: grid; grid-template-columns: minmax(0, 1fr) 126px; gap: 8px; }
+.custom-bid-tuner { min-width: 0; min-height: 82px; padding: 9px 11px 7px; border: 1px solid #211c15; border-radius: 7px; background: #f6eedc; }
+.custom-bid-tuner > div, .custom-bid-tuner > small { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.custom-bid-tuner > div span { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.custom-bid-tuner output { color: #17130e; font: 800 20px/1 "DM Mono", monospace; }
+.custom-bid-tuner > small { color: #746a5a; font: 600 6px/1 "DM Mono", monospace; letter-spacing: .07em; }
+.custom-bid-tuner input { width: 100%; height: 30px; margin: 2px 0 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: ew-resize; touch-action: pan-y; }
+.custom-bid-tuner input::-webkit-slider-runnable-track { height: 8px; border: 1px solid #211c15; border-radius: 999px; background: linear-gradient(90deg, #d39a20 0 var(--bid-progress), #d8cdb8 var(--bid-progress) 100%); }
+.custom-bid-tuner input::-webkit-slider-thumb { width: 26px; height: 26px; margin-top: -10px; border: 2px solid #17130e; border-radius: 50%; appearance: none; -webkit-appearance: none; background: #f6eedc; box-shadow: 2px 2px 0 #17130e; }
+.custom-bid-tuner input::-moz-range-track { height: 8px; border: 1px solid #211c15; border-radius: 999px; background: #d8cdb8; }
+.custom-bid-tuner input::-moz-range-progress { height: 8px; border-radius: 999px; background: #d39a20; }
+.custom-bid-tuner input::-moz-range-thumb { width: 26px; height: 26px; border: 2px solid #17130e; border-radius: 50%; background: #f6eedc; box-shadow: 2px 2px 0 #17130e; }
 .custom-bid-form button { min-width: 126px; border: 1px solid #17130e; border-radius: 7px; background: #17130e; color: #f6eedc; font-size: 10px; font-weight: 800; cursor: pointer; }
 .custom-bid-form button:disabled, .custom-bid-form input:disabled { opacity: .42; cursor: default; }
 .phone-budget { min-height: 70px; margin-top: 18px; border: 1px solid #211c15; display: grid; grid-template-columns: repeat(3, 1fr); }

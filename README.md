@@ -108,7 +108,7 @@ Run a complete sequential simulation and write a self-contained HTML roster repo
 ./simulate-autodraft.command
 ```
 
-By default, the simulator resets and uses only the bundled 315-player FantasyPros CSV snapshot in a 12-team league. Its standard lineup is 1 QB, 2 RB, 3 WR, 1 TE, 1 FLEX, 1 K, and 1 DST, with the remaining roster spots treated as bench. The exact FantasyPros values—including $0 entries—remain roster utility and the anchor for local opponent bid ceilings. Pass `--help` for CSV, league, seed, output, and OpenAI/local-mode overrides. If Node and npm are installed, `npm run simulate:autodraft` remains an equivalent option.
+By default, the simulator resets and uses only the bundled 315-player FantasyPros CSV snapshot in a 12-team league. Every 15-player autobidder roster is enforced as exactly 2 QB, 4 RB, 5 WR, 2 TE, 1 K, and 1 DST. The exact FantasyPros values—including $0 entries—remain roster utility and the anchor for local opponent bid ceilings. Pass `--help` for CSV, league, seed, output, and OpenAI/local-mode overrides. If Node and npm are installed, `npm run simulate:autodraft` remains an equivalent option.
 
 Train a player-by-player maximum-bid vector with evolutionary search:
 

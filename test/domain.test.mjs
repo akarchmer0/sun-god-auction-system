@@ -141,6 +141,49 @@ test("FLEX requirements accept an extra RB, WR, or TE after base slots", () => {
   assert.equal(canTeamRosterPlayer(draft, "a", "tight-end"), true);
 });
 
+test("standard auto rosters enforce exact position counts", () => {
+  const positions = ["QB", "QB", "RB", "RB", "RB", "RB", "WR", "WR", "WR", "WR", "TE", "TE", "K", "DST"];
+  const rosterPlayers = positions.map((position, index) => ({
+    id: `rostered-${index}`,
+    name: `Rostered ${index}`,
+    position,
+    status: "sold"
+  }));
+  const candidates = [
+    { id: "extra-qb", name: "Extra QB", position: "QB", status: "available" },
+    { id: "needed-wr", name: "Needed WR", position: "WR", status: "available" }
+  ];
+  const draft = createDraft({
+    players: [...rosterPlayers, ...candidates],
+    teams: [{
+      id: "auto",
+      name: "Auto",
+      manager: "Robot",
+      controller: { type: "auto" },
+      roster: rosterPlayers.map((player) => ({ playerId: player.id, price: 1 }))
+    }],
+    rosterSize: 15,
+    rosterRequirements: { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DST: 1 }
+  });
+
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-qb"), false);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "needed-wr"), true);
+
+  const humanDraft = createDraft({
+    players: [...rosterPlayers, ...candidates],
+    teams: [{
+      id: "human",
+      name: "Human",
+      manager: "Person",
+      controller: { type: "human" },
+      roster: rosterPlayers.map((player) => ({ playerId: player.id, price: 1 }))
+    }],
+    rosterSize: 15,
+    rosterRequirements: { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DST: 1 }
+  });
+  assert.equal(canTeamRosterPlayer(humanDraft, "human", "extra-qb"), true);
+});
+
 test("nomination order advances after a result and rewinds with undo", () => {
   let draft = createDraft({ players, teams, budget: 20, rosterSize: 3, nominationOrder: ["b", "a"] });
   assert.equal(currentNominator(draft).id, "b");

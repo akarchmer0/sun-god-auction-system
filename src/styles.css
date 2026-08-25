@@ -161,6 +161,9 @@ button { color: inherit; }
 .auction-stage::before { content: ""; position: absolute; inset: 0; opacity: .1; background-image: linear-gradient(#3a3934 1px, transparent 1px), linear-gradient(90deg, #3a3934 1px, transparent 1px); background-size: 32px 32px; mask-image: radial-gradient(circle, black, transparent 68%); }
 .stage-glow { position: absolute; width: 500px; height: 500px; border-radius: 50%; background: radial-gradient(circle, rgba(240,93,35,.09), transparent 67%); pointer-events: none; }
 .lot-number { position: absolute; top: 24px; left: 27px; color: #5f5f58; font: 500 9px/1 "DM Mono", monospace; letter-spacing: .15em; }
+.stage-countdown { position: absolute; z-index: 2; top: 22px; right: 27px; min-width: 154px; display: flex; flex-direction: column; align-items: flex-end; color: #d72d24; font-family: "DM Mono", monospace; text-align: right; }
+.stage-countdown span, .stage-countdown small { color: #a5261d; font-size: 10px; font-weight: 500; line-height: 1; letter-spacing: .16em; }
+.stage-countdown strong { display: block; margin: 5px -4px 3px 0; font-size: clamp(64px, 7vw, 92px); font-weight: 500; line-height: .84; letter-spacing: -.09em; font-variant-numeric: tabular-nums; }
 .position-badge { position: relative; width: 56px; height: 56px; border: 1px solid #3d3b35; background: #1e1e1b; border-radius: 50%; display: grid; place-items: center; color: var(--orange-soft); font: 500 13px/1 "DM Mono", monospace; box-shadow: 0 0 0 8px rgba(31,31,28,.6); }
 .player-identity { position: relative; margin-top: 19px; }
 .nfl-team { color: var(--orange-soft); font: 500 10px/1 "DM Mono", monospace; letter-spacing: .16em; }

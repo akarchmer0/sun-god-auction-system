@@ -90,6 +90,8 @@ let autoEnabled = true;
 let setupStep = 1;
 let pendingCsvImport = null;
 let countdownTimer = null;
+let countdownDisplayTimer = null;
+let countdownDeadlineAt = null;
 let autoDraftTimer = null;
 let autoIntentRequestSequence = 0;
 let patterTimer = null;
@@ -320,8 +322,19 @@ function playerCard(player, highBidder, nominator) {
   const statusCopy = state.auction.phase === "sold"
     ? `SOLD TO ${highBidder?.name?.toUpperCase()}`
     : state.auction.phase === "passed" ? "NO SALE" : phaseLabel(state.auction.phase).toUpperCase();
+  const showCountdown = ["once", "twice"].includes(state.auction.phase);
+  const countdownActive = autoEnabled && !pendingVisualTie && !visualBidWindow;
+  const countdownSeconds = countdownDeadlineAt == null
+    ? (countdownDelayMs(state.config, state.auction.phase)
+      + (state.auction.phase === "once" ? countdownDelayMs(state.config, "twice") : 0)) / 1_000
+    : Math.max(0, countdownDeadlineAt - Date.now()) / 1_000;
   return `
     <div class="lot-number">LOT ${String(state.sales.length + 1).padStart(2, "0")} · ${escapeHtml(nominator?.manager || "Commissioner")}’S NOMINATION</div>
+    ${showCountdown ? `<div class="stage-countdown" role="timer" aria-label="${phaseLabel(state.auction.phase)} countdown">
+      <span>TIME LEFT</span>
+      <strong data-countdown-value>${countdownActive ? countdownSeconds.toFixed(1) : "—"}</strong>
+      <small>SECONDS</small>
+    </div>` : ""}
     <div class="position-badge">${player.position}</div>
     <div class="player-identity">
       <span class="nfl-team">${player.nflTeam}</span>
@@ -404,7 +417,7 @@ function setupDialog() {
       </fieldset>
     </section>
     <section class="setup-step ${setupStep === 2 ? "is-active" : ""}" data-setup-step="2">
-      <p>Set minimum position slots. FLEX accepts RB, WR, or TE; bench slots accept any position.</p>
+      <p>Set minimum position slots for human teams. Standard 15-player autobidders are fixed at 2 QB, 4 RB, 5 WR, 2 TE, 1 K, and 1 DST.</p>
       <div class="position-requirements">
         ${ROSTER_POSITIONS.map((position) => `<label><span>${position}</span><input name="position_${position}" type="number" min="0" max="10" value="${requirements[position]}" required /></label>`).join("")}
         <label class="bench-position"><span>BENCH</span><input name="benchSlots" type="number" min="0" max="20" value="${benchSlots}" required /></label>
@@ -919,10 +932,10 @@ function submitBid(teamId, bidAmount = null, { source = "manual" } = {}) {
 
 function runCountdownStep(force = false) {
   if (!force && (pendingVisualTie || visualBidWindow)) return;
-  clearTimer();
+  const before = state.auction.phase;
+  clearTimer({ preserveDeadline: before === "once" });
   clearAutoDraftTimer();
   clearPatter();
-  const before = state.auction.phase;
   state = advanceCountdown(state);
   persistDraft();
   render();
@@ -957,10 +970,31 @@ function runCountdownStep(force = false) {
 }
 
 function scheduleCountdown() {
-  clearTimer();
-  if (!autoEnabled || pendingVisualTie || visualBidWindow || !["open", "once", "twice"].includes(state.auction.phase)) return;
-  const delay = countdownDelayMs(state.config, state.auction.phase);
+  const canSchedule = autoEnabled
+    && !pendingVisualTie
+    && !visualBidWindow
+    && ["open", "once", "twice"].includes(state.auction.phase);
+  const continuingDeadline = canSchedule && state.auction.phase === "twice" ? countdownDeadlineAt : null;
+  clearTimer({ preserveDeadline: continuingDeadline != null });
+  if (!canSchedule) {
+    schedulePhoneRoomSync();
+    return;
+  }
+  let delay = countdownDelayMs(state.config, state.auction.phase);
+  if (state.auction.phase === "once") {
+    countdownDeadlineAt = Date.now() + delay + countdownDelayMs(state.config, "twice");
+  } else if (state.auction.phase === "twice") {
+    countdownDeadlineAt = continuingDeadline || Date.now() + delay;
+    delay = Math.max(0, countdownDeadlineAt - Date.now());
+  } else {
+    countdownDeadlineAt = Date.now() + delay;
+  }
+  if (["once", "twice"].includes(state.auction.phase)) {
+    updateCountdownDisplay();
+    countdownDisplayTimer = window.setInterval(updateCountdownDisplay, 100);
+  }
   countdownTimer = window.setTimeout(runCountdownStep, delay);
+  schedulePhoneRoomSync();
 }
 
 function resumeAuctionFlow() {
@@ -1088,9 +1122,21 @@ function livePatterContext() {
   };
 }
 
-function clearTimer() {
+function clearTimer({ preserveDeadline = false } = {}) {
   if (countdownTimer) window.clearTimeout(countdownTimer);
+  if (countdownDisplayTimer) window.clearInterval(countdownDisplayTimer);
   countdownTimer = null;
+  countdownDisplayTimer = null;
+  if (!preserveDeadline) countdownDeadlineAt = null;
+  const countdownValue = document.querySelector("[data-countdown-value]");
+  if (countdownValue && !preserveDeadline) countdownValue.textContent = "—";
+}
+
+function updateCountdownDisplay() {
+  const countdownValue = document.querySelector("[data-countdown-value]");
+  if (!countdownValue || countdownDeadlineAt == null) return;
+  const secondsRemaining = Math.max(0, countdownDeadlineAt - Date.now()) / 1_000;
+  countdownValue.textContent = secondsRemaining.toFixed(1);
 }
 
 function clearPatter() {
@@ -1227,16 +1273,17 @@ function stopAuctioneer() {
 
 function handlePhoneBid(bid) {
   if (!bid?.teamId) return;
+  const amount = bid.bidMode === "next" ? nextVisualBidAmount(state) : Number(bid.amount);
   if (!["open", "once", "twice"].includes(state.auction.phase)) {
-    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount: Number(bid.amount), status: "rejected" });
+    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount, status: "rejected" });
     return;
   }
-  if (!canPlaceVisualBid(bid.teamId, Number(bid.amount))) {
-    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount: Number(bid.amount), status: "rejected" });
+  if (!canPlaceVisualBid(bid.teamId, amount)) {
+    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount, status: "rejected" });
     return;
   }
   if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
-  collectExternalBids([{ teamId: bid.teamId, amount: bid.amount, messageId: bid.participantMessageId || bid.id }], "phone", bid.receivedAt);
+  collectExternalBids([{ teamId: bid.teamId, amount, messageId: bid.participantMessageId || bid.id }], "phone", bid.receivedAt);
 }
 
 function collectExternalBids(bids, source, receivedAt = Date.now()) {
@@ -1544,6 +1591,7 @@ async function syncPhoneRoomState() {
         amount: state.auction.amount,
         nextBid: nextVisualBidAmount(state),
         highBidderId: state.auction.highBidderId,
+        countdownEndsAt: ["once", "twice"].includes(state.auction.phase) ? countdownDeadlineAt : null,
         acceptingBids: ["open", "once", "twice"].includes(state.auction.phase) && !pendingVisualTie,
         player: player ? { id: player.id, name: player.name, position: player.position, nflTeam: player.nflTeam, suggestedValue: player.suggestedValue } : null
       },

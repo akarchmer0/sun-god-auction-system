@@ -50,7 +50,7 @@ test("phone bids use the server clock and require an open auction", () => {
   hub.updateAuction({
     roomId: "BDX222",
     hostKey,
-    auction: { phase: "open", amount: 4, nextBid: 5, acceptingBids: true, player: { id: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR", suggestedValue: 42 } },
+    auction: { phase: "once", amount: 4, nextBid: 5, countdownEndsAt: 1_800_000_000_000, acceptingBids: true, player: { id: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR", suggestedValue: 42 } },
     teams: teams.map((team, index) => ({
       id: team.id,
       budget: index ? 200 : 158,
@@ -63,6 +63,7 @@ test("phone bids use the server clock and require an open auction", () => {
   const rosterSnapshot = hub.snapshot("BDX222");
   assert.deepEqual(rosterSnapshot.teams[0].roster, [{ playerId: "puka", name: "Puka Nacua", position: "WR", nflTeam: "LAR", price: 42 }]);
   assert.equal(rosterSnapshot.auction.player.suggestedValue, 42);
+  assert.equal(rosterSnapshot.auction.countdownEndsAt, 1_800_000_000_000);
   now = 2450;
   const bid = hub.placeBid({ roomId: "BDX222", teamId: "team-1", participantToken: phoneOne });
   assert.equal(bid.receivedAt, 2450);
