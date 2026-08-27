@@ -55,6 +55,7 @@ test("configured AI autodraft batches teams with strict structured output", asyn
   assert.match(request.body.instructions, /must take the player for \$1 if nobody else bids/);
   assert.match(request.body.input, /"nominatorTeamId"/);
   assert.match(request.body.input, /"teamId":"a"/);
+  assert.doesNotMatch(request.body.input, /marketAverage|marketProjected|aggressiveness|strategy/);
   assert.deepEqual(result, { decisions, provider: "openai", model: "gpt-test" });
 });
 

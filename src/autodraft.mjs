@@ -15,7 +15,7 @@ const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
 const INTENT_VALUE_MULTIPLIERS = Object.freeze({
   discount: 0.9,
   value: 1,
-  target: 1.1
+  target: 1.05
 });
 const AUTO_BID_STANDARD_DEVIATION = 0.05;
 
@@ -78,10 +78,10 @@ export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction
 
   const normalizedIntent = AUTO_INTENTS.includes(intent) ? intent : localAutoIntent(state, teamId, playerId).intent;
   if (normalizedIntent === "pass") return state.auction?.nominatorTeamId === teamId ? 1 : 0;
-
   const standardNormal = deterministicStandardNormal(
     `${team.id}:${player.id}:${state.auction?.nominatorTeamId || ""}:${state.sales?.length || 0}:max-value`
   );
+
   return Math.min(
     maxBidForTeam(state, teamId),
     sampledAutoBidValue(playerSuggestedValue(player), normalizedIntent, standardNormal)
@@ -138,7 +138,7 @@ export function chooseAutoNomination(state, teamId) {
   if (!available.length) return null;
   return available.map((player) => {
     const decision = localAutoIntent(state, teamId, player.id);
-    const intentBonus = decision.intent === "target" ? 1.1 : decision.intent === "value" ? 1 : decision.intent === "discount" ? 0.9 : 0.25;
+    const intentBonus = decision.intent === "target" ? 1.05 : decision.intent === "value" ? 1 : decision.intent === "discount" ? 0.9 : 0.25;
     const score = playerSuggestedValue(player) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
     return { player, score };
   }).sort((a, b) => b.score - a.score || a.player.id.localeCompare(b.player.id))[0].player.id;
@@ -163,9 +163,7 @@ export function buildAutoIntentContext(state) {
       id: player?.id || "",
       name: cleanText(player?.name, 100),
       position: normalizePosition(player?.position),
-      suggestedValue: wholeNumber(player?.suggestedValue),
-      marketAverage: wholeNumber(player?.marketAverage),
-      marketProjected: wholeNumber(player?.marketProjected)
+      suggestedValue: wholeNumber(player?.suggestedValue)
     },
     league: {
       budget: wholeNumber(state.config?.budget),
@@ -183,8 +181,6 @@ export function buildAutoIntentContext(state) {
       teamId: team.id,
       teamName: cleanText(team.name, 100),
       manager: cleanText(team.manager, 100),
-      strategy: autoTeamController(team.controller).strategy,
-      aggressiveness: autoTeamController(team.controller).aggressiveness,
       budgetRemaining: wholeNumber(team.budget),
       rosterSlotsRemaining: Math.max(0, Number(state.config.rosterSize) - team.roster.length),
       maxLegalBid: maxBidForTeam(state, team.id),

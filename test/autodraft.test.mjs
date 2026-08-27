@@ -65,11 +65,11 @@ test("local strategy uses discounted bench depth instead of stalling before the 
   assert.deepEqual(localAutoIntent(state, "a", "runner-four"), { intent: "discount", reason: "position_saturated" });
 });
 
-test("intent maximums use the specified normal distributions", () => {
+test("intent maximums use noisy suggested-value distributions", () => {
   assert.equal(sampledAutoBidValue(100, "pass", 10), 0);
   assert.equal(sampledAutoBidValue(100, "discount", 0), 90);
   assert.equal(sampledAutoBidValue(100, "value", 0), 100);
-  assert.equal(sampledAutoBidValue(100, "target", 0), 110);
+  assert.equal(sampledAutoBidValue(100, "target", 0), 105);
   assert.equal(sampledAutoBidValue(100, "value", 1), 105);
   assert.equal(sampledAutoBidValue(100, "value", -1), 95);
 });

@@ -44,7 +44,7 @@ Outcome:
 
 Decision criteria:
 - Consider roster construction, unfilled required positions, remaining slots, remaining budget, player suggested value, positional depth still available, and the recent auction market.
-- Treat suggestedValue as roster utility and marketAverage as the observed Yahoo auction market when present. Use the latter to anticipate competition, not as proof that overpaying improves the roster.
+- Treat suggestedValue as the player's roster utility.
 - A team that is saturated at a position should usually pass, but may choose discount for an exceptional bargain fit.
 - Preserve enough flexibility and budget to complete a legal, balanced roster.
 - Treat each team independently even though all decisions are returned together.
@@ -71,8 +71,6 @@ export function normalizeAutodraftContext(value = {}) {
     teamId: cleanText(team?.teamId, 80) || `team-${index + 1}`,
     teamName: cleanText(team?.teamName, 100),
     manager: cleanText(team?.manager, 100),
-    strategy: "balanced",
-    aggressiveness: boundedNumber(team?.aggressiveness, 0.75, 1.25, 1),
     budgetRemaining: wholeNumber(team?.budgetRemaining),
     rosterSlotsRemaining: wholeNumber(team?.rosterSlotsRemaining),
     maxLegalBid: wholeNumber(team?.maxLegalBid),
@@ -94,9 +92,7 @@ export function normalizeAutodraftContext(value = {}) {
       id: cleanText(value?.player?.id, 100),
       name: cleanText(value?.player?.name, 100),
       position: cleanPosition(value?.player?.position),
-      suggestedValue: wholeNumber(value?.player?.suggestedValue),
-      marketAverage: wholeNumber(value?.player?.marketAverage),
-      marketProjected: wholeNumber(value?.player?.marketProjected)
+      suggestedValue: wholeNumber(value?.player?.suggestedValue)
     },
     league: {
       budget: wholeNumber(value?.league?.budget),
@@ -157,9 +153,4 @@ function cleanText(value, maximum) {
 function wholeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(100_000, Math.max(0, Math.round(number))) : 0;
-}
-
-function boundedNumber(value, minimum, maximum, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
 }
