@@ -74,6 +74,8 @@ Completed countdown calls are cached in a bounded in-memory audio cache, keyed b
 
 The laptop creates a private room code and join link. Local mode uses the Mac’s network address; personal remote mode uses your HTTPS relay. No participant app or account is required. Remote bidder pages default to sound enabled; the first team-selection or speaker-button tap unlocks mobile playback, and the speaker button can mute that phone at any time.
 
+In remote mode, a manager can claim their team even when it begins on auto draft. The phone’s **Draft control** switch hands bidding and nominations to Sun God or returns them to the manager without releasing that phone’s team claim. A change made during a nominated or live lot is clearly queued for the next nomination, so the current player always finishes under one control mode.
+
 1. Finish the team order in **League setup**.
 2. Each participant scans the QR code in the **Phone bidding** panel.
 3. The participant chooses their manager. Sun God prevents another phone from claiming the same team.
@@ -96,7 +98,7 @@ The nomination turn follows the order configured during league setup and advance
 
 ### Hybrid auto draft
 
-Mark any team as **Auto draft** during league setup. Auto teams cannot be claimed by a phone. Every nomination is a committed $1 opening bid by the nominating team, so that team receives the player for $1 if nobody raises; later bids rise by the configured increment. Sun God makes one batched strategic decision for every auto team: **pass**, **discount**, **value**, or **target**. A pass stays silent for a non-nominator; for the nominating team, it means accepting the forced $1 opening bid but making no further raise. The other intents sample a private maximum from a normal distribution centered at 90%, 100%, or 105% of suggested value, respectively, with a standard deviation of 5% of suggested value. Every later auto bid randomly jumps one to three legal increments, lands after a varied 2–5 second reaction delay, and never exceeds that team's frozen maximum. Roster eligibility, salary-cap reserves, and every state change pass through the same auction engine as human bids.
+Mark any team as **Auto draft** during league setup. Local auto teams cannot be claimed by a LAN phone; in remote mode, the team’s manager can claim ownership and use **Draft control** to take over later. Alex Gerszten and Yuvi Bermel are matched by manager name to their CSVs in `data/auto-draft-values/`. Each custom value takes priority, missing players fall back to `data/player_values.csv`, and custom-only players are ignored so the draft always uses the exact current base universe. Every nomination is a committed $1 opening bid by the nominating team, so that team receives the player for $1 if nobody raises; later bids rise by the configured increment. Sun God makes one batched strategic decision for every auto team: **pass**, **discount**, **value**, or **target**. A pass stays silent for a non-nominator; for the nominating team, it means accepting the forced $1 opening bid but making no further raise. The other intents sample a private maximum from a normal distribution centered at 90%, 100%, or 105% of that team's suggested value, respectively, with a standard deviation of 1% of suggested value (2σ = 2%). Every later auto bid randomly jumps one to three legal increments, lands after a varied 2–5 second reaction delay, and never exceeds that team's frozen maximum. Roster eligibility, salary-cap reserves, and every state change pass through the same auction engine as human bids.
 
 With `OPENAI_API_KEY`, the server uses one structured `gpt-5.6-luna` request per nomination and freezes the result before live bidding. The model receives only displayed draft facts, team construction, positional availability, and recent price/value ratios—never phone tokens or identifiers. If the request is unavailable, invalid, late, or slower than 1.8 seconds, the balanced local strategy is used immediately and any late response is ignored. Set `OPENAI_AUTODRAFT_MODEL` to override the intent model.
 
@@ -108,7 +110,7 @@ Run a complete sequential simulation and write a self-contained HTML roster repo
 ./simulate-autodraft.command
 ```
 
-By default, the simulator resets and uses only the bundled 315-player FantasyPros CSV snapshot in a 12-team league. Every 15-player autobidder roster is enforced as exactly 2 QB, 4 RB, 5 WR, 2 TE, 1 K, and 1 DST. The exact FantasyPros values—including $0 entries—remain roster utility and the anchor for local opponent bid ceilings. Pass `--help` for CSV, league, seed, output, and OpenAI/local-mode overrides. If Node and npm are installed, `npm run simulate:autodraft` remains an equivalent option.
+By default, the simulator resets and uses the 340-player `data/player_values.csv` base universe in a 12-team league. Every 15-player autobidder roster is enforced as exactly 2 QB, at least 3 RB, at least 4 WR, at least 1 TE, exactly 1 K, and exactly 1 DST; the remaining slots may be any mix of RB, WR, and TE. The exact base values—including $0 entries—remain roster utility and the anchor for local opponent bid ceilings. Pass `--help` for CSV, league, seed, output, and OpenAI/local-mode overrides. If Node and npm are installed, `npm run simulate:autodraft` remains an equivalent option.
 
 Train a player-by-player maximum-bid vector with evolutionary search:
 
@@ -132,7 +134,7 @@ Number keys 1–9 place quick bids. Space advances the countdown manually.
 
 ## Player CSV
 
-The player board defaults to the supplied 315-player FantasyPros CSV snapshot. The **Reload FantasyPros values** control restores that exact list and resets the draft; no fictional player pool or secondary market-value source is mixed into it.
+The player board defaults to the 340 players in `data/player_values.csv`. The **Reload player values** control restores that exact list and resets the draft; no fictional player pool or secondary market-value source is mixed into it.
 
 Importing a CSV opens a column-mapping preview before it resets the draft. Map player name and position, then optionally map NFL team and suggested auction value. Common headings such as `Player Name`, `Athlete`, `Pos`, `Pro Team`, and `Auction Value` are matched automatically, while quoted names and values containing commas are supported.
 

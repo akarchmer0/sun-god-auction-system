@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTeams } from "../src/data.mjs";
-import { fantasyProsPlayers } from "../src/fantasy-pros-data.mjs";
+import { fantasyProsPlayersFromCsv } from "../src/fantasy-pros-data.mjs";
 import { parseCsv, playersFromMappedCsv, suggestCsvMapping, buildResultsPayload } from "../src/draft-io.mjs";
 import { advanceCountdown, AUTO_ROSTER_REQUIREMENTS, canTeamRosterPlayer, createDraft, maxBidForTeam, nominatePlayer, openAuction, placeBid, ROSTER_POSITIONS } from "../src/domain.mjs";
 import {
@@ -19,6 +19,7 @@ import { OpenAIAutodraftService } from "../src/openai-autodraft-service.mjs";
 import { applyYahooMarketValues, parseYahooMarketValues } from "../src/yahoo-market-values.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const fantasyProsPlayers = fantasyProsPlayersFromCsv(await readFile(join(ROOT, "data", "player_values.csv"), "utf8"));
 const SAVED_DRAFT_PATH = join(homedir(), "Library", "Application Support", "Sun God Auctioneer", "current.json");
 const STANDARD_REQUIREMENTS = AUTO_ROSTER_REQUIREMENTS;
 const DEFAULT_OUTPUT = resolve(ROOT, "artifacts/autodraft-simulation.html");
@@ -29,7 +30,7 @@ Usage:
 
   With npm installed: npm run simulate:autodraft -- [options]
 
-By default, the script uses the bundled FantasyPros CSV snapshot and the league
+By default, the script uses data/player_values.csv and the league
 setup from Sun God's current durable draft snapshot. Every player is reset to
 available and every team is converted to auto draft before the simulation starts.
 
@@ -303,7 +304,7 @@ export async function loadSimulationSource(options = {}) {
     sourceLabel = options.playersPath;
   } else {
     players = fantasyProsPlayers.map((player) => ({ ...player }));
-    sourceLabel = "Bundled FantasyPros CSV snapshot";
+    sourceLabel = "data/player_values.csv base snapshot";
   }
   players = players.map((player) => ({
     ...player,

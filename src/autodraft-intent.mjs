@@ -35,16 +35,16 @@ Outcome:
 - Independently decide how interested each supplied auto team should be in the nominated player.
 - Return one decision for every supplied team, using exactly that team's teamId.
 - Use target when the team should pay a premium to pursue the player.
-- Use value when the player is worth approximately the supplied suggested value to the team.
-- Use discount when the team is interested only below the supplied suggested value.
+- Use value when the player is worth approximately that team's supplied teams[].suggestedValue.
+- Use discount when the team is interested only below that team's supplied teams[].suggestedValue.
 - Use pass when a non-nominating team should stay silent for the entire lot, or when the nominating team should make no raise beyond its committed opening bid.
 - Every nomination is a committed $1 opening bid by nomination.nominatorTeamId. That team already owns the high bid and must take the player for $1 if nobody else bids.
 - The nominating team cannot avoid the $1 purchase by choosing pass. Account for that forced roster and budget outcome when deciding its intent; pass only prevents it from raising if another team bids.
 - For every other team, any non-pass decision means it is willing to bid at least the next legal price and pursue the player up to its sampled maximum.
 
 Decision criteria:
-- Consider roster construction, unfilled required positions, remaining slots, remaining budget, player suggested value, positional depth still available, and the recent auction market.
-- Treat suggestedValue as the player's roster utility.
+- Consider roster construction, unfilled minimum requirements, exact position maximums, remaining slots, remaining budget, each team's suggested value, positional depth still available, and the recent auction market.
+- Treat each teams[].suggestedValue as that team's private roster utility for the nominated player. player.suggestedValue is only the league's base display value and may differ by team.
 - A team that is saturated at a position should usually pass, but may choose discount for an exceptional bargain fit.
 - Preserve enough flexibility and budget to complete a legal, balanced roster.
 - Treat each team independently even though all decisions are returned together.
@@ -74,6 +74,7 @@ export function normalizeAutodraftContext(value = {}) {
     budgetRemaining: wholeNumber(team?.budgetRemaining),
     rosterSlotsRemaining: wholeNumber(team?.rosterSlotsRemaining),
     maxLegalBid: wholeNumber(team?.maxLegalBid),
+    suggestedValue: wholeNumber(team?.suggestedValue),
     roster: Array.isArray(team?.roster) ? team.roster.slice(0, 30).map((spot) => ({
       name: cleanText(spot?.name, 100),
       position: cleanPosition(spot?.position),
@@ -81,6 +82,7 @@ export function normalizeAutodraftContext(value = {}) {
     })) : []
   })) : [];
   const requirements = value?.league?.rosterRequirements || {};
+  const maximums = value?.league?.rosterMaximums || {};
   const remaining = value?.remainingByPosition || {};
   return {
     nomination: {
@@ -98,6 +100,7 @@ export function normalizeAutodraftContext(value = {}) {
       budget: wholeNumber(value?.league?.budget),
       rosterSize: wholeNumber(value?.league?.rosterSize),
       rosterRequirements: Object.fromEntries([...allowedPositions].map((position) => [position, wholeNumber(requirements[position])])),
+      rosterMaximums: Object.fromEntries([...allowedPositions].filter((position) => maximums[position] != null).map((position) => [position, wholeNumber(maximums[position])])),
       soldCount: wholeNumber(value?.league?.soldCount),
       availableCount: wholeNumber(value?.league?.availableCount)
     },

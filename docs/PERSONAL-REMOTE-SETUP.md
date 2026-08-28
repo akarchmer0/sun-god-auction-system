@@ -31,6 +31,8 @@ For the desktop app, enter the same URL and secret during Commissioner setup. Th
 
 Click **Enable remote bidders** before sharing the QR code. Wait for the room status to show **LIVE**, then have each league member scan or open the same link and claim their team. Local and remote members should all use that relay link once remote mode is enabled.
 
+A manager may claim a team that is already using auto draft. From the bidder phone, **Draft control** can enable auto draft or return the team to manual bidding while keeping the phone attached to that team. The phone asks for confirmation before either handoff. If a player has already been nominated, the change is queued for the next nomination and the current auction continues under its existing control mode.
+
 Lucy’s auctioneer transcript is forwarded to remote bidder phones and read with each phone’s browser voice. Mobile browsers require a user gesture before playing sound, so tap the amber speaker once. The button says “Phone audio on” when successfully enabled, turns green when sound is ready, and can mute or re-enable that phone without affecting anyone else.
 
 If the button reports that remote bidding is not configured, verify both settings and restart the host. If authorization fails, replace the Worker secret and host secret with the same new value. If a participant page opens but does not become connected, confirm the current room link was shared; room links expire after 24 hours and are replaced whenever a new remote room is created.

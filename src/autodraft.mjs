@@ -1,4 +1,4 @@
-import { canTeamRosterPlayer, maxBidForTeam, nextLegalBidAmount, rosterRequirementsForTeam, ROSTER_POSITIONS } from "./domain.mjs";
+import { canTeamRosterPlayer, maxBidForTeam, nextLegalBidAmount, rosterMaximumsForTeam, rosterRequirementsForTeam, ROSTER_POSITIONS } from "./domain.mjs";
 
 export const AUTO_INTENTS = Object.freeze(["pass", "discount", "value", "target"]);
 export const AUTO_INTENT_REASONS = Object.freeze([
@@ -17,7 +17,9 @@ const INTENT_VALUE_MULTIPLIERS = Object.freeze({
   value: 1,
   target: 1.05
 });
-const AUTO_BID_STANDARD_DEVIATION = 0.05;
+const AUTO_BID_STANDARD_DEVIATION = 0.01;
+const DEFERRED_CONTROLLER_PHASES = new Set(["ready", "open", "once", "twice", "paused"]);
+const CONTROLLER_BOUNDARY_PHASES = new Set(["idle", "sold", "passed"]);
 
 export function autoTeamController(controller) {
   return controller?.type === "auto"
@@ -29,14 +31,51 @@ export function isAutoTeam(team) {
   return autoTeamController(team?.controller).type === "auto";
 }
 
-export function localAutoIntents(state, playerId = state?.auction?.playerId) {
+export function requestTeamControllerChange(state, teamId, requestedType) {
+  const targetType = requestedType === "auto" ? "auto" : requestedType === "human" ? "human" : null;
+  const team = state?.teams?.find((item) => item.id === teamId);
+  if (!team) throw new Error("Choose a valid team.");
+  if (!targetType) throw new Error("Choose manual or auto draft control.");
+  const activeType = isAutoTeam(team) ? "auto" : "human";
+  const shouldDefer = DEFERRED_CONTROLLER_PHASES.has(state?.auction?.phase);
+  const pendingControllerType = shouldDefer && targetType !== activeType ? targetType : null;
+  const teams = state.teams.map((item) => {
+    if (item.id !== teamId) return item;
+    if (shouldDefer) return { ...item, pendingControllerType };
+    return { ...item, controller: autoTeamController({ type: targetType }), pendingControllerType: null };
+  });
+  return {
+    state: { ...state, teams },
+    effective: pendingControllerType ? "next_nomination" : "now",
+    activeType: shouldDefer ? activeType : targetType,
+    pendingType: pendingControllerType
+  };
+}
+
+export function applyPendingControllerChanges(state) {
+  if (!CONTROLLER_BOUNDARY_PHASES.has(state?.auction?.phase)) return state;
+  let changed = false;
+  const teams = (state?.teams || []).map((team) => {
+    const pendingType = team?.pendingControllerType;
+    if (!["auto", "human"].includes(pendingType)) {
+      if (team?.pendingControllerType == null) return team;
+      changed = true;
+      return { ...team, pendingControllerType: null };
+    }
+    changed = true;
+    return { ...team, controller: autoTeamController({ type: pendingType }), pendingControllerType: null };
+  });
+  return changed ? { ...state, teams } : state;
+}
+
+export function localAutoIntents(state, playerId = state?.auction?.playerId, valueProfiles = []) {
   return Object.fromEntries((state?.teams || []).filter(isAutoTeam).map((team) => {
-    const decision = localAutoIntent(state, team.id, playerId);
+    const decision = localAutoIntent(state, team.id, playerId, valueProfiles);
     return [team.id, { ...decision, provider: "local", model: null }];
   }));
 }
 
-export function localAutoIntent(state, teamId, playerId = state?.auction?.playerId) {
+export function localAutoIntent(state, teamId, playerId = state?.auction?.playerId, valueProfiles = []) {
   const team = state?.teams?.find((item) => item.id === teamId);
   const player = state?.players?.find((item) => item.id === playerId);
   if (!team || !player || !isAutoTeam(team) || !canTeamRosterPlayer(state, teamId, playerId)) {
@@ -65,18 +104,18 @@ export function localAutoIntent(state, teamId, playerId = state?.auction?.player
     }
     return { intent: "pass", reason: "position_saturated" };
   }
-  if (team.budget <= openSlots + Math.max(2, Math.round(playerSuggestedValue(player) * 0.3))) {
+  if (team.budget <= openSlots + Math.max(2, Math.round(autoDraftSuggestedValue(state, teamId, playerId, valueProfiles) * 0.3))) {
     return { intent: "discount", reason: "budget_preservation" };
   }
   return { intent: "value", reason: "value_opportunity" };
 }
 
-export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction?.playerId, intent = null) {
+export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction?.playerId, intent = null, valueProfiles = []) {
   const team = state?.teams?.find((item) => item.id === teamId);
   const player = state?.players?.find((item) => item.id === playerId);
   if (!team || !player || !isAutoTeam(team) || !canTeamRosterPlayer(state, teamId, playerId)) return 0;
 
-  const normalizedIntent = AUTO_INTENTS.includes(intent) ? intent : localAutoIntent(state, teamId, playerId).intent;
+  const normalizedIntent = AUTO_INTENTS.includes(intent) ? intent : localAutoIntent(state, teamId, playerId, valueProfiles).intent;
   if (normalizedIntent === "pass") return state.auction?.nominatorTeamId === teamId ? 1 : 0;
   const standardNormal = deterministicStandardNormal(
     `${team.id}:${player.id}:${state.auction?.nominatorTeamId || ""}:${state.sales?.length || 0}:max-value`
@@ -84,7 +123,7 @@ export function calculateAutoBidCeiling(state, teamId, playerId = state?.auction
 
   return Math.min(
     maxBidForTeam(state, teamId),
-    sampledAutoBidValue(playerSuggestedValue(player), normalizedIntent, standardNormal)
+    sampledAutoBidValue(autoDraftSuggestedValue(state, teamId, playerId, valueProfiles), normalizedIntent, standardNormal)
   );
 }
 
@@ -96,7 +135,7 @@ export function sampledAutoBidValue(suggestedValue, intent, standardNormal = 0) 
   return Math.max(0, Math.round(mean + noise));
 }
 
-export function chooseAutoBid(state, ceilingOverrides = null) {
+export function chooseAutoBid(state, ceilingOverrides = null, valueProfiles = []) {
   if (!["open", "once", "twice"].includes(state?.auction?.phase)) return null;
   const nextAmount = nextLegalBidAmount(state);
   const playerId = state.auction.playerId;
@@ -104,13 +143,13 @@ export function chooseAutoBid(state, ceilingOverrides = null) {
   const candidates = state.teams.map((team) => {
     if (!isAutoTeam(team) || team.id === state.auction.highBidderId) return false;
     if (!canTeamRosterPlayer(state, team.id, playerId)) return null;
-    const intent = intents[team.id]?.intent || localAutoIntent(state, team.id, playerId).intent;
+    const intent = intents[team.id]?.intent || localAutoIntent(state, team.id, playerId, valueProfiles).intent;
     const overridden = ceilingOverrides && Object.prototype.hasOwnProperty.call(ceilingOverrides, team.id)
       ? Number(ceilingOverrides[team.id])
       : null;
     const ceiling = Number.isFinite(overridden)
       ? Math.min(maxBidForTeam(state, team.id), Math.max(team.id === state.auction.nominatorTeamId ? 1 : 0, Math.round(overridden)))
-      : calculateAutoBidCeiling(state, team.id, playerId, intent);
+      : calculateAutoBidCeiling(state, team.id, playerId, intent, valueProfiles);
     return nextAmount <= ceiling ? { team, intent, ceiling } : null;
   }).filter(Boolean);
   if (!candidates.length) return null;
@@ -131,20 +170,20 @@ export function chooseAutoBid(state, ceilingOverrides = null) {
   };
 }
 
-export function chooseAutoNomination(state, teamId) {
+export function chooseAutoNomination(state, teamId, valueProfiles = []) {
   const team = state?.teams?.find((item) => item.id === teamId);
   if (!team || !isAutoTeam(team)) return null;
   const available = state.players.filter((player) => player.status === "available" && canTeamRosterPlayer(state, teamId, player.id));
   if (!available.length) return null;
   return available.map((player) => {
-    const decision = localAutoIntent(state, teamId, player.id);
+    const decision = localAutoIntent(state, teamId, player.id, valueProfiles);
     const intentBonus = decision.intent === "target" ? 1.05 : decision.intent === "value" ? 1 : decision.intent === "discount" ? 0.9 : 0.25;
-    const score = playerSuggestedValue(player) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
+    const score = autoDraftSuggestedValue(state, teamId, player.id, valueProfiles) * intentBonus * deterministicMultiplier(`${teamId}:${player.id}:nominate`, 0.97, 1.03);
     return { player, score };
   }).sort((a, b) => b.score - a.score || a.player.id.localeCompare(b.player.id))[0].player.id;
 }
 
-export function buildAutoIntentContext(state) {
+export function buildAutoIntentContext(state, valueProfiles = []) {
   const player = state.players.find((item) => item.id === state.auction.playerId);
   const available = state.players.filter((item) => item.status === "available");
   const soldPlayers = new Map(state.players.map((item) => [item.id, item]));
@@ -169,6 +208,7 @@ export function buildAutoIntentContext(state) {
       budget: wholeNumber(state.config?.budget),
       rosterSize: wholeNumber(state.config?.rosterSize),
       rosterRequirements: normalizedRequirements(state),
+      rosterMaximums: normalizedMaximums(state),
       soldCount: state.sales.length,
       availableCount: available.length
     },
@@ -184,6 +224,7 @@ export function buildAutoIntentContext(state) {
       budgetRemaining: wholeNumber(team.budget),
       rosterSlotsRemaining: Math.max(0, Number(state.config.rosterSize) - team.roster.length),
       maxLegalBid: maxBidForTeam(state, team.id),
+      suggestedValue: autoDraftSuggestedValue(state, team.id, player?.id, valueProfiles),
       roster: team.roster.slice(0, 30).map((spot) => {
         const rosterPlayer = state.players.find((item) => item.id === spot.playerId);
         return {
@@ -196,9 +237,9 @@ export function buildAutoIntentContext(state) {
   };
 }
 
-export function normalizeAutoIntents(state, decisions, { provider = "local", model = null } = {}) {
+export function normalizeAutoIntents(state, decisions, { provider = "local", model = null, valueProfiles = [] } = {}) {
   const allowedTeamIds = new Set(state.teams.filter(isAutoTeam).map((team) => team.id));
-  const fallback = localAutoIntents(state);
+  const fallback = localAutoIntents(state, state?.auction?.playerId, valueProfiles);
   const normalized = { ...fallback };
   for (const decision of Array.isArray(decisions) ? decisions : []) {
     const teamId = String(decision?.teamId || "");
@@ -206,6 +247,20 @@ export function normalizeAutoIntents(state, decisions, { provider = "local", mod
     normalized[teamId] = { intent: decision.intent, reason: decision.reason, provider, model };
   }
   return normalized;
+}
+
+export function autoDraftSuggestedValue(state, teamId, playerId, valueProfiles = []) {
+  const team = state?.teams?.find((item) => item.id === teamId);
+  const player = state?.players?.find((item) => item.id === playerId);
+  if (!player) return 0;
+  const managerKey = normalizeManagerKey(team?.manager);
+  const profile = (Array.isArray(valueProfiles) ? valueProfiles : []).find((item) => item?.managerKey === managerKey);
+  const customValue = profile?.values && Object.prototype.hasOwnProperty.call(profile.values, player.id)
+    ? Number(profile.values[player.id])
+    : NaN;
+  return Number.isFinite(customValue) && customValue >= 0
+    ? Math.round(customValue)
+    : wholeNumber(player.suggestedValue);
 }
 
 export function autoBidDelayMs(state, teamId) {
@@ -230,6 +285,11 @@ function rosterPositionCounts(state, team) {
 function normalizedRequirements(state, team = state?.teams?.find(isAutoTeam)) {
   const requirements = rosterRequirementsForTeam(state, team);
   return Object.fromEntries(ROSTER_POSITIONS.map((position) => [position, Math.max(0, wholeNumber(requirements?.[position]))]));
+}
+
+function normalizedMaximums(state, team = state?.teams?.find(isAutoTeam)) {
+  const maximums = rosterMaximumsForTeam(state, team);
+  return Object.fromEntries(Object.entries(maximums).map(([position, maximum]) => [position, wholeNumber(maximum)]));
 }
 
 function missingFlexSlots(requirements, counts) {
@@ -278,8 +338,13 @@ function cleanText(value, maximum) {
   return String(value || "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, maximum);
 }
 
-function playerSuggestedValue(player) {
-  return Math.max(1, Number(player?.suggestedValue) || 1);
+function normalizeManagerKey(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv)\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function wholeNumber(value) {

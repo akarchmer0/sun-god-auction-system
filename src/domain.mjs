@@ -1,7 +1,9 @@
 export const MIN_BID = 1;
 
 export const ROSTER_POSITIONS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
-export const AUTO_ROSTER_REQUIREMENTS = Object.freeze({ QB: 2, RB: 4, WR: 5, TE: 2, FLEX: 0, K: 1, DST: 1 });
+export const AUTO_ROSTER_REQUIREMENTS = Object.freeze({ QB: 2, RB: 3, WR: 4, TE: 1, FLEX: 0, K: 1, DST: 1 });
+export const AUTO_ROSTER_MAXIMUMS = Object.freeze({ QB: 2, K: 1, DST: 1 });
+export const AUTO_ROSTER_SIZE = 15;
 export const DEFAULT_COUNTDOWN_SECONDS = Object.freeze({ once: 5.2, twice: 4.2 });
 
 export function createDraft({
@@ -94,17 +96,22 @@ export function canTeamRosterPlayer(state, teamId, playerId) {
   const team = state.teams.find((item) => item.id === teamId);
   const player = state.players.find((item) => item.id === playerId);
   if (!team || !player || team.roster.length >= state.config.rosterSize) return false;
+  const maximum = rosterMaximumsForTeam(state, team)[String(player.position || "").toUpperCase()];
+  if (maximum != null && rosterPositionCount(state, team.roster, player.position) >= maximum) return false;
   const rosterAfterPurchase = [...team.roster, { playerId: player.id, price: 0 }];
   const openSlots = state.config.rosterSize - rosterAfterPurchase.length;
   return missingRequiredSlots(state, rosterAfterPurchase, rosterRequirementsForTeam(state, team)) <= openSlots;
 }
 
 export function rosterRequirementsForTeam(state, team) {
-  const autoRosterSize = Object.values(AUTO_ROSTER_REQUIREMENTS).reduce((sum, count) => sum + count, 0);
-  if (team?.controller?.type === "auto" && Number(state?.config?.rosterSize) === autoRosterSize) {
+  if (usesStandardAutoRoster(state, team)) {
     return { ...AUTO_ROSTER_REQUIREMENTS };
   }
   return normalizeRosterRequirements(state?.config?.rosterRequirements);
+}
+
+export function rosterMaximumsForTeam(state, team) {
+  return usesStandardAutoRoster(state, team) ? { ...AUTO_ROSTER_MAXIMUMS } : {};
 }
 
 export function nominatePlayer(state, playerId) {
@@ -336,6 +343,19 @@ function missingRequiredSlots(state, roster, requirements = normalizeRosterRequi
   }, 0);
   missing += Math.max(0, requirements.FLEX - flexEligible);
   return missing;
+}
+
+function rosterPositionCount(state, roster, position) {
+  const normalizedPosition = String(position || "").toUpperCase();
+  return roster.reduce((count, spot) => (
+    String(state.players.find((player) => player.id === spot.playerId)?.position || "").toUpperCase() === normalizedPosition
+      ? count + 1
+      : count
+  ), 0);
+}
+
+function usesStandardAutoRoster(state, team) {
+  return team?.controller?.type === "auto" && Number(state?.config?.rosterSize) === AUTO_ROSTER_SIZE;
 }
 
 function normalizeRosterRequirements(requirements = {}) {

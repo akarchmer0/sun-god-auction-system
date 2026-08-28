@@ -55,7 +55,7 @@ test("simulation defaults to a twelve-team league", () => {
   assert.equal(parseSimulationArgs([]).teamCount, 12);
 });
 
-test("simulation defaults to the exact FantasyPros CSV values without market overlays", async () => {
+test("simulation defaults to the exact data/player_values.csv values without market overlays", async () => {
   const source = await loadSimulationSource({
     draftStatePath: "/tmp/sun-god-no-saved-draft.json",
     teamCount: 2,
@@ -63,10 +63,10 @@ test("simulation defaults to the exact FantasyPros CSV values without market ove
     seed: "fantasypros-source-test"
   });
 
-  assert.equal(source.players.length, 315);
+  assert.equal(source.players.length, 340);
   assert.equal(source.players[0].name, "Jahmyr Gibbs");
-  assert.equal(source.players[0].suggestedValue, 61);
+  assert.equal(source.players[0].suggestedValue, 63);
   assert.equal(source.players.find((player) => player.name === "Daniel Jones")?.suggestedValue, 0);
   assert.equal(source.players.some((player) => "marketAverage" in player), false);
-  assert.match(source.sourceLabel, /FantasyPros CSV snapshot/);
+  assert.match(source.sourceLabel, /data\/player_values\.csv base snapshot/);
 });

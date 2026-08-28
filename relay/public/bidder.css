@@ -46,6 +46,15 @@ button { color: inherit; }
 .phone-team-header strong { margin-top: 5px; font-size: 17px; line-height: 1; }
 .phone-team-header b { margin-top: 4px; color: #746a5a; font-size: 9px; }
 .phone-team-header button { border: 0; background: none; color: #746a5a; font-size: 9px; text-decoration: underline; }
+.phone-draft-control { min-height: 58px; margin-top: 13px; padding: 9px 10px; border: 1px solid #211c15; border-radius: 8px; display: flex; align-items: center; gap: 10px; background: #fff9ed; }
+.phone-draft-control.is-auto { background: #f1dfc2; box-shadow: inset 5px 0 0 #d39a20; }
+.phone-draft-control.is-pending { border-style: dashed; }
+.phone-draft-control > span { min-width: 0; flex: 1; }
+.phone-draft-control small, .phone-draft-control strong { display: block; }
+.phone-draft-control small { color: #746a5a; font: 600 7px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.phone-draft-control strong { margin-top: 5px; font-size: 12px; line-height: 1.15; }
+.phone-draft-control button { min-height: 36px; padding: 0 11px; border: 1px solid #211c15; border-radius: 6px; background: #17130e; color: #f6eedc; font-size: 8px; font-weight: 800; cursor: pointer; }
+.phone-draft-control button:disabled { opacity: .45; cursor: default; }
 .phone-tabs { min-height: 43px; margin-top: 17px; border: 1px solid #211c15; border-radius: 7px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #eadfc9; }
 .phone-tabs.has-history { grid-template-columns: repeat(3, 1fr); }
 .phone-tabs button { border: 0; border-radius: 4px; background: transparent; color: #746a5a; font-size: 10px; font-weight: 800; cursor: pointer; }
@@ -72,6 +81,10 @@ button { color: inherit; }
 .bid-button small { display: block; max-width: 280px; margin: 7px auto 0; font-size: 9px; font-weight: 600; letter-spacing: 0; }
 .bid-button:disabled { background: #d8cdb8; color: #766e61; border-color: #766e61; box-shadow: 0 6px 0 #766e61; cursor: default; }
 .bid-button.is-winning { background: #17130e; color: #f6eedc; border-color: var(--team); box-shadow: 0 7px 0 var(--team); }
+.phone-autodraft-bidding { min-height: 116px; padding: 22px; border: 2px solid #17130e; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f1dfc2; box-shadow: 0 8px 0 #d39a20; text-align: center; }
+.phone-autodraft-bidding span { color: #8a5b00; font: 700 8px/1 "DM Mono", monospace; letter-spacing: .15em; }
+.phone-autodraft-bidding strong { margin-top: 8px; font-size: 21px; line-height: 1; }
+.phone-autodraft-bidding p { max-width: 280px; margin: 8px 0 0; color: #746a5a; font-size: 10px; line-height: 1.4; }
 .phone-bid-tools { margin-top: 18px; padding: 13px; border: 1px solid #211c15; border-radius: 10px; background: #fff9ed; }
 .phone-bid-tools-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .phone-bid-tools-head span small, .phone-bid-tools-head span strong { display: block; }
@@ -162,5 +175,14 @@ button { color: inherit; }
 .phone-history-empty { min-height: 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #746a5a; }
 .phone-history-empty strong { color: #17130e; font-size: 14px; }
 .phone-history-empty span { max-width: 240px; margin-top: 6px; font-size: 10px; line-height: 1.45; }
+.phone-confirmation-backdrop { position: fixed; z-index: 20; inset: 0; padding: 18px; display: flex; align-items: flex-end; justify-content: center; background: rgba(23,19,14,.56); }
+.phone-confirmation-sheet { width: min(100%, 430px); padding: 22px; border: 2px solid #17130e; border-radius: 14px 14px 8px 8px; background: #f6eedc; box-shadow: 0 9px 0 #17130e; }
+.phone-confirmation-sheet h2 { margin: 9px 0 8px; font-size: 24px; line-height: 1.05; letter-spacing: -.035em; }
+.phone-confirmation-sheet p { margin: 0; color: #62594c; font-size: 12px; line-height: 1.5; }
+.phone-confirmation-sheet > div { margin-top: 19px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.phone-confirmation-sheet button { min-height: 50px; border: 1px solid #17130e; border-radius: 7px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.phone-confirmation-sheet .wide-secondary { background: #fff9ed; color: #17130e; }
+.phone-confirmation-sheet .wide-primary { background: #d39a20; color: #17130e; }
+.phone-confirmation-sheet button:disabled { opacity: .48; cursor: default; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 620px) { body { display: grid; place-items: center; padding: 24px; } .bidder-shell { width: 430px; min-height: min(860px, calc(100dvh - 48px)); border: 1px solid #211c15; box-shadow: 14px 14px 0 rgba(23,19,14,.18); } .bidder-room { min-height: 700px; } }

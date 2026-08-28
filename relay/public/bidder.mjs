@@ -28,6 +28,8 @@ let customBidAmount = null;
 let customBidLotKey = null;
 let customBidDragging = false;
 let phoneCountdownTimer = null;
+let autodraftConfirmation = null;
+let changingAutodraft = false;
 const phoneAudio = new RemotePhoneAudio({ onStateChange: () => render() });
 
 localStorage.setItem(TOKEN_KEY, participantToken);
@@ -57,6 +59,13 @@ function wireEvents() {
       if (phoneAudio.enabled && phoneAudio.state !== "on") void phoneAudio.unlock();
       if (button.dataset.action === "claim") return await claimTeam(button.dataset.teamId);
       if (button.dataset.action === "bid") return await placePhoneBid(button.dataset.amount == null ? null : Number(button.dataset.amount));
+      if (button.dataset.action === "open-autodraft-confirmation") {
+        autodraftConfirmation = { enabled: button.dataset.enabled === "true" };
+        render();
+        return;
+      }
+      if (button.dataset.action === "cancel-autodraft-confirmation") { autodraftConfirmation = null; render(); return; }
+      if (button.dataset.action === "confirm-autodraft") return await setPhoneAutodraft(button.dataset.enabled === "true");
       if (button.dataset.action === "show-tab") {
         activePhoneTab = ["roster", "history"].includes(button.dataset.tab) ? button.dataset.tab : "auction";
         if (activePhoneTab === "roster" && !viewedRosterTeamId) viewedRosterTeamId = selectedTeamId;
@@ -97,6 +106,8 @@ function connectToRelay() {
   connectionState = "connecting";
   claimAuthenticated = false;
   restoreInFlight = false;
+  changingAutodraft = false;
+  autodraftConfirmation = null;
   status = "loading";
   message = room ? "Reconnecting to the draft room…" : "Connecting to the draft room…";
   render();
@@ -194,6 +205,15 @@ function handleRelayMessage(payload) {
     render();
     return;
   }
+  if (payload.type === "autodraft.result") {
+    message = payload.status === "accepted"
+      ? payload.effective === "next_nomination"
+        ? `${payload.enabled ? "Autodraft" : "Manual control"} starts next nomination`
+        : payload.enabled ? "Autodraft is on" : "You are drafting"
+      : payload.error || "Draft control did not change.";
+    render();
+    return;
+  }
   if (payload.type === "host.status") {
     hostConnected = payload.connected !== false;
     if (!hostConnected) phoneAudio.cancel();
@@ -274,11 +294,32 @@ async function releaseTeam() {
   }
 }
 
+async function setPhoneAutodraft(enabled) {
+  if (changingAutodraft || !selectedTeamId) return;
+  if (connectionState !== "connected") throw new Error("Wait for the relay to reconnect before changing draft control.");
+  if (!hostConnected) throw new Error("The commissioner is offline; draft control cannot change.");
+  changingAutodraft = true;
+  message = "Changing draft control…";
+  render();
+  try {
+    const result = await roomTransport.setAutodraft({ teamId: selectedTeamId, participantToken, enabled });
+    if (result?.status !== "accepted") throw new Error(result?.error || "Draft control did not change.");
+    autodraftConfirmation = null;
+    message = result.effective === "next_nomination"
+      ? `${enabled ? "Autodraft" : "Manual control"} starts next nomination`
+      : enabled ? "Autodraft is on" : "You are drafting";
+  } finally {
+    changingAutodraft = false;
+    render();
+  }
+}
+
 async function placePhoneBid(requestedAmount = null) {
   if (sendingBid || !selectedTeamId) return;
   if (connectionState !== "connected") throw new Error("The relay is reconnecting. Wait for the green status light.");
   if (!hostConnected) throw new Error("The commissioner is offline; bids are paused.");
   const team = room?.teams?.find((item) => item.id === selectedTeamId);
+  if (team?.autoDraft) throw new Error("Autodraft controls this team until the next nomination.");
   const nextBid = Number(room?.auction?.nextBid);
   const bidMode = requestedAmount == null ? "next" : "custom";
   const amount = requestedAmount == null ? nextBid : Number(requestedAmount);
@@ -445,7 +486,7 @@ function renderError() {
 function renderTeamChoice() {
   renderShell(`<section class="team-choice">
     <span class="kicker">ROOM ${escapeHtml(roomId)}</span><h1>Who are you?</h1><p>Choose your team. One phone can control each team.</p>
-    <div class="phone-team-list">${room.teams.map((team) => `<button data-action="claim" data-team-id="${escapeHtml(team.id)}" ${team.claimed || team.autoDraft || connectionState !== "connected" ? "disabled" : ""}><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${escapeHtml(team.name)}</small></span><b>${team.autoDraft ? "AUTO" : team.claimed ? "JOINED" : "SELECT"}</b></button>`).join("")}</div>
+    <div class="phone-team-list">${room.teams.map((team) => `<button data-action="claim" data-team-id="${escapeHtml(team.id)}" ${team.claimed || connectionState !== "connected" ? "disabled" : ""}><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${escapeHtml(team.name)}</small></span><b>${team.claimed ? "JOINED" : team.autoDraft ? "AUTO · SELECT" : "SELECT"}</b></button>`).join("")}</div>
   </section>`);
 }
 
@@ -463,10 +504,11 @@ function renderBidder() {
   const highBidder = room.teams.find((item) => item.id === auction.highBidderId);
   const hasHighBid = auction.highBidderId === team.id;
   const hasAnyBid = Boolean(highBidder);
+  const isAutoDraft = team.autoDraft === true;
   const canAfford = Number(team.maxBid) >= Number(auction.nextBid);
   const hasRosterFit = team.eligibleForPlayer !== false;
   const relayReady = connectionState === "connected" && hostConnected;
-  const canBid = relayReady && auction.acceptingBids && !hasHighBid && canAfford && hasRosterFit && !sendingBid;
+  const canBid = relayReady && !isAutoDraft && auction.acceptingBids && !hasHighBid && canAfford && hasRosterFit && !sendingBid;
   const customBidMinimum = Number(auction.nextBid || 1);
   const customBidMaximum = Math.max(customBidMinimum, Number(team.maxBid || 0));
   const nextCustomBidLotKey = `${player?.id || "waiting"}:${selectedTeamId}`;
@@ -511,7 +553,7 @@ function renderBidder() {
       <div class="phone-price"><small>${hasHighBid ? "YOUR HIGH BID" : hasAnyBid ? "CURRENT BID" : "OPENING BID"}</small><strong><sup>$</sup>${Number(auction.amount || 1)}</strong>${highBidder ? `<div class="phone-bid-holder" style="--bid-holder:${highBidder.color}"><i></i><span><small>HELD BY</small><b>${escapeHtml(highBidder.name)}</b></span><em>${escapeHtml(highBidder.manager)}</em></div>` : ""}</div>
       <span class="phone-phase">${escapeHtml(phaseLabel(auction.phase))}</span>
     </div>
-    <button class="bid-button ${hasHighBid ? "is-winning" : ""}" data-action="bid" ${canBid ? "" : "disabled"}>${buttonLabel}<small>${canBid ? "Tap once — every bid is confirmed by the host" : escapeHtml(message)}</small></button>
+    ${isAutoDraft ? `<section class="phone-autodraft-bidding"><span>AUTODRAFT ACTIVE</span><strong>Sun God has the controls</strong><p>${team.pendingAutoDraft === false ? "You’ll take control when the next nomination begins." : "Bids and nominations follow the balanced autodraft strategy."}</p></section>` : `<button class="bid-button ${hasHighBid ? "is-winning" : ""}" data-action="bid" ${canBid ? "" : "disabled"}>${buttonLabel}<small>${canBid ? "Tap once — every bid is confirmed by the host" : escapeHtml(message)}</small></button>
     <section class="phone-bid-tools" aria-label="Jump bid options">
       <div class="phone-bid-tools-head"><span><small>EASY BIDS</small><strong>Jump the price</strong></span>${player?.suggestedValue ? `<b>SUGGESTED $${Number(player.suggestedValue)}</b>` : ""}</div>
       ${easyBids.length ? `<div class="easy-bid-grid">${easyBids.map((amount) => `<button data-action="bid" data-amount="${amount}" ${canBid ? "" : "disabled"}><small>EASY BID</small><strong>$${amount}</strong></button>`).join("")}</div>` : `<p class="no-easy-bids">No useful round-number jumps remain below the suggested value.</p>`}
@@ -523,7 +565,7 @@ function renderBidder() {
         </div>
         <button ${canBid ? "" : "disabled"}>Place $${customBidAmount} bid</button>
       </form>
-    </section>
+    </section>`}
     <div class="phone-budget"><span><small>BUDGET</small><strong>$${Number(team.budget || 0)}</strong></span><span><small>MAX BID</small><strong>$${Number(team.maxBid || 0)}</strong></span><span><small>ROSTER</small><strong>${Number(team.rosterCount || 0)}/${Number(team.rosterSize || 0)}</strong></span></div>`;
   const rosterTab = `<div class="phone-roster-view" style="--roster-team:${rosterTeam.color}">
       <div class="phone-roster-title">
@@ -540,11 +582,42 @@ function renderBidder() {
     </div>`;
   renderShell(`<section class="bidder-room ${activePhoneTab === "history" ? "is-history" : ""}" style="--team:${team.color}">
     <div class="phone-team-header"><span><small>YOUR TEAM</small><strong>${escapeHtml(team.manager)}</strong><b>${escapeHtml(team.name)}</b></span><button data-action="switch-team">Switch</button></div>
+    ${draftControlCard(team)}
     <nav class="phone-tabs has-history" aria-label="Bidder views"><button class="${activePhoneTab === "auction" ? "is-active" : ""}" data-action="show-tab" data-tab="auction">Auction</button><button class="${activePhoneTab === "roster" ? "is-active" : ""}" data-action="show-tab" data-tab="roster">Roster <b>${roster.length}</b></button><button class="${activePhoneTab === "history" ? "is-active" : ""}" data-action="show-tab" data-tab="history">History <b>${history.length}</b></button></nav>
     ${room.meetingLink ? `<a class="league-call-link" href="${escapeHtml(room.meetingLink)}" target="_blank" rel="noreferrer">Join league call</a>` : ""}
     ${activePhoneTab === "roster" ? rosterTab : activePhoneTab === "history" ? historyTab : auctionTab}
-  </section>`);
+  </section>${autodraftConfirmation ? autodraftConfirmationSheet(team, auction) : ""}`);
   if (activePhoneTab === "auction") startPhoneCountdown(auction);
+}
+
+function draftControlCard(team) {
+  const isAutoDraft = team.autoDraft === true;
+  const hasPendingChange = team.pendingAutoDraft === true || team.pendingAutoDraft === false;
+  const targetEnabled = hasPendingChange ? isAutoDraft : !isAutoDraft;
+  const status = hasPendingChange
+    ? `${team.pendingAutoDraft ? "Autodraft" : "Manual control"} starts next nomination`
+    : isAutoDraft ? "Sun God is drafting" : "You are drafting";
+  const action = hasPendingChange ? "Cancel change" : isAutoDraft ? "Take control" : "Enable autodraft";
+  const disabled = changingAutodraft || connectionState !== "connected" || !hostConnected;
+  return `<section class="phone-draft-control ${isAutoDraft ? "is-auto" : "is-human"} ${hasPendingChange ? "is-pending" : ""}">
+    <span><small>DRAFT CONTROL</small><strong>${escapeHtml(status)}</strong></span>
+    <button data-action="open-autodraft-confirmation" data-enabled="${targetEnabled}" ${disabled ? "disabled" : ""}>${changingAutodraft ? "SAVING…" : action}</button>
+  </section>`;
+}
+
+function autodraftConfirmationSheet(team, auction) {
+  const enabled = autodraftConfirmation.enabled === true;
+  const activeEnabled = team.autoDraft === true;
+  const cancelingPending = (team.pendingAutoDraft === true || team.pendingAutoDraft === false) && enabled === activeEnabled;
+  const deferred = ["ready", "open", "once", "twice", "paused"].includes(auction.phase) && enabled !== activeEnabled;
+  const title = cancelingPending ? "Cancel scheduled change?" : enabled ? "Hand draft control to Sun God?" : "Take back draft control?";
+  const copy = cancelingPending
+    ? `The scheduled handoff will be removed and ${activeEnabled ? "autodraft" : "manual control"} will remain active.`
+    : `${enabled ? "Sun God will make bids and nominations for your team." : "Autodraft will stop and this phone will make bids and nominations again."} ${deferred ? "The change starts with the next nomination; the current player keeps the existing control mode." : "The change takes effect immediately before the next nomination."}`;
+  return `<div class="phone-confirmation-backdrop" role="presentation"><section class="phone-confirmation-sheet" role="dialog" aria-modal="true" aria-labelledby="autodraft-confirmation-title">
+    <span class="kicker">DRAFT CONTROL</span><h2 id="autodraft-confirmation-title">${escapeHtml(title)}</h2><p>${escapeHtml(copy)}</p>
+    <div><button class="wide-secondary" data-action="cancel-autodraft-confirmation">Keep current setting</button><button class="wide-primary" data-action="confirm-autodraft" data-enabled="${enabled}" ${changingAutodraft ? "disabled" : ""}>${changingAutodraft ? "Saving…" : "Confirm"}</button></div>
+  </section></div>`;
 }
 
 function connectionMessage() {

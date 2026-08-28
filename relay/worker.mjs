@@ -152,6 +152,10 @@ export class AuctionRoom {
       const result = createRoomMessage("bid.result", { ...message, replyTo: message.participantMessageId }, { messageId: message.messageId, roomRevision: this.revision });
       return this.#broadcastToTeam(message.teamId, result);
     }
+    if (message.type === "autodraft.result") {
+      const result = createRoomMessage("autodraft.result", { ...message, replyTo: message.participantMessageId }, { messageId: message.messageId, roomRevision: this.revision });
+      return this.#broadcastToTeam(message.teamId, result);
+    }
     if (message.type === "speech.start" || message.type === "speech.fallback") {
       const attachment = socket.deserializeAttachment() || {};
       if (attachment.speechId && attachment.speechId !== message.speechId) {
@@ -205,7 +209,7 @@ export class AuctionRoom {
   async #handleParticipant(socket, attachment, message) {
     if (message.type === "team.claim") {
       const teamId = cleanId(message.teamId);
-      if (!this.snapshot?.teams?.some((team) => team.id === teamId && !team.autoDraft)) throw new Error("Choose a valid team.");
+      if (!this.snapshot?.teams?.some((team) => team.id === teamId)) throw new Error("Choose a valid team.");
       const tokenHash = await hash(message.participantToken);
       const existing = this.claims[teamId];
       if (existing && existing !== tokenHash) throw new Error("That team is already claimed.");
@@ -221,6 +225,19 @@ export class AuctionRoom {
       await this.state.storage.put("claims", this.claims);
       return this.#broadcast(createRoomMessage("room.snapshot", { room: this.snapshot, claims: publicClaims(this.claims), hostConnected: this.#hostConnected(), replyTo: message.messageId }, { roomRevision: this.revision }));
     }
+    if (message.type === "autodraft.set") {
+      if (!this.#hostConnected()) throw new Error("The commissioner is offline; draft control cannot change.");
+      const teamId = cleanId(message.teamId || attachment.teamId);
+      const participantTokenHash = await hash(message.participantToken);
+      if (this.claims[teamId] !== participantTokenHash) throw new Error("Claim a team before changing draft control.");
+      if (!this.snapshot?.teams?.some((team) => team.id === teamId)) throw new Error("Choose a valid team.");
+      socket.serializeAttachment({ ...attachment, teamId, participantTokenHash });
+      return this.#broadcast(createRoomMessage("autodraft.proposed", {
+        teamId,
+        enabled: message.enabled === true,
+        participantMessageId: message.messageId
+      }, { roomRevision: this.revision }), "host");
+    }
     if (message.type === "bid.submit") {
       if (!this.#hostConnected()) throw new Error("The commissioner is offline; bids are paused.");
       const teamId = cleanId(message.teamId || attachment.teamId);
@@ -231,6 +248,7 @@ export class AuctionRoom {
       const amount = bidMode === "next" ? Number(this.snapshot.auction.nextBid) : Number(message.amount);
       if (!Number.isInteger(amount) || amount < Number(this.snapshot.auction.nextBid)) throw new Error("Bid amount is not legal.");
       const team = this.snapshot.teams.find((item) => item.id === teamId);
+      if (team?.autoDraft) throw new Error("Autodraft controls this team until the next nomination.");
       if (!team || amount > Number(team.maxBid)) throw new Error("Bid exceeds the team maximum.");
       const receivedAt = Date.now();
       if (receivedAt - Number(attachment.lastBidAt || 0) < 200) throw new Error("Bid already received.");

@@ -74,6 +74,7 @@ export class RelayRoomTransport {
   claimTeam(payload) { return this.request("team.claim", payload); }
   releaseTeam(payload) { return this.request("team.release", payload); }
   submitBid(payload) { return this.request("bid.submit", payload); }
+  setAutodraft(payload) { return this.request("autodraft.set", payload); }
   publishState(payload) { return this.request("state.publish", payload); }
   closeRoom(payload = {}) { return this.request("room.close", payload); }
 

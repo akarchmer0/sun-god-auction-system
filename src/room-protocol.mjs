@@ -2,6 +2,7 @@ export const ROOM_PROTOCOL_VERSION = 1;
 export const ROOM_MESSAGE_TYPES = new Set([
   "host.hello", "participant.join", "team.claim", "team.release", "bid.submit",
   "bid.received", "bid.proposed", "bid.result", "state.publish", "host.status",
+  "autodraft.set", "autodraft.proposed", "autodraft.result",
   "room.close", "room.snapshot", "error", "heartbeat", "heartbeat.ack",
   "speech.start", "speech.audio", "speech.fallback", "speech.end", "speech.cancel"
 ]);

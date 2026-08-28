@@ -193,3 +193,110 @@ test("a bid restores a valid stored claim when the socket attachment loses it", 
   assert.equal(participant.attachment.teamId, "team-1");
   assert.ok(participant.attachment.participantTokenHash);
 });
+
+test("a claimed auto team can request a host-authoritative handoff but cannot bid manually", async () => {
+  class FakeStorage {
+    constructor(values) { this.values = new Map(Object.entries(values)); }
+    async get(key) { return this.values.get(key); }
+    async put(key, value) {
+      if (typeof key === "object") for (const [name, item] of Object.entries(key)) this.values.set(name, item);
+      else this.values.set(key, value);
+    }
+  }
+  class FakeSocket {
+    constructor(attachment) { this.attachment = attachment; this.sent = []; }
+    deserializeAttachment() { return this.attachment; }
+    serializeAttachment(value) { this.attachment = value; }
+    send(value) { this.sent.push(value); }
+  }
+  const storage = new FakeStorage({
+    snapshot: {
+      auction: { acceptingBids: true, nextBid: 7 },
+      teams: [{ id: "team-1", maxBid: 50, autoDraft: true, pendingAutoDraft: null }]
+    },
+    claims: {},
+    revision: 4
+  });
+  const state = {
+    storage,
+    sockets: [],
+    blockConcurrencyWhile(callback) { this.ready = Promise.resolve(callback()); },
+    getWebSockets(role) { return this.sockets.filter((socket) => !role || socket.attachment.role === role); }
+  };
+  const room = new AuctionRoom(state, {});
+  await state.ready;
+  const host = new FakeSocket({ role: "host", authenticated: true });
+  const participant = new FakeSocket({ role: "participant", authenticated: true });
+  state.sockets.push(host, participant);
+
+  await room.webSocketMessage(participant, JSON.stringify(createRoomMessage("team.claim", {
+    teamId: "team-1",
+    participantToken: "participant-auto-token"
+  }, { messageId: "claim_auto_123", roomRevision: 4 })));
+  assert.equal(Object.keys(room.claims)[0], "team-1");
+  participant.sent = [];
+  host.sent = [];
+
+  await room.webSocketMessage(participant, JSON.stringify(createRoomMessage("autodraft.set", {
+    teamId: "team-1",
+    participantToken: "different-participant-token",
+    enabled: false
+  }, { messageId: "autodraft_denied_123", roomRevision: 4 })));
+  assert.match(JSON.parse(participant.sent.at(-1)).error, /claim a team/i);
+  assert.equal(host.sent.length, 0);
+  participant.sent = [];
+
+  await room.webSocketMessage(participant, JSON.stringify(createRoomMessage("autodraft.set", {
+    teamId: "team-1",
+    participantToken: "participant-auto-token",
+    enabled: false
+  }, { messageId: "autodraft_set_123", roomRevision: 4 })));
+  const proposal = JSON.parse(host.sent[0]);
+  assert.equal(proposal.type, "autodraft.proposed");
+  assert.equal(proposal.teamId, "team-1");
+  assert.equal(proposal.enabled, false);
+  assert.equal(proposal.participantMessageId, "autodraft_set_123");
+
+  await room.webSocketMessage(participant, JSON.stringify(createRoomMessage("bid.submit", {
+    teamId: "team-1",
+    participantToken: "participant-auto-token",
+    amount: 7,
+    bidMode: "next"
+  }, { messageId: "auto_bid_blocked_123", roomRevision: 4 })));
+  assert.match(JSON.parse(participant.sent.at(-1)).error, /autodraft controls/i);
+
+  participant.sent = [];
+  await room.webSocketMessage(host, JSON.stringify(createRoomMessage("autodraft.result", {
+    teamId: "team-1",
+    participantMessageId: "autodraft_set_123",
+    enabled: false,
+    effective: "next_nomination",
+    status: "accepted"
+  }, { messageId: "autodraft_result_123", roomRevision: 4 })));
+  const result = JSON.parse(participant.sent[0]);
+  assert.equal(result.type, "autodraft.result");
+  assert.equal(result.replyTo, "autodraft_set_123");
+  assert.equal(result.effective, "next_nomination");
+
+  participant.sent = [];
+  host.sent = [];
+  await room.webSocketMessage(host, JSON.stringify(createRoomMessage("state.publish", {
+    room: {
+      auction: { acceptingBids: true, nextBid: 7 },
+      teams: [{ id: "team-1", maxBid: 50, autoDraft: false, pendingAutoDraft: null }]
+    }
+  }, { messageId: "manual_state_123", roomRevision: 4 })));
+  assert.equal(Object.keys(room.claims)[0], "team-1");
+  assert.equal(JSON.parse(participant.sent[0]).room.teams[0].autoDraft, false);
+
+  participant.sent = [];
+  host.sent = [];
+  await room.webSocketMessage(participant, JSON.stringify(createRoomMessage("bid.submit", {
+    teamId: "team-1",
+    participantToken: "participant-auto-token",
+    amount: 7,
+    bidMode: "next"
+  }, { messageId: "manual_bid_123", roomRevision: 5 })));
+  assert.equal(JSON.parse(participant.sent[0]).type, "bid.received");
+  assert.equal(JSON.parse(host.sent[0]).type, "bid.proposed");
+});

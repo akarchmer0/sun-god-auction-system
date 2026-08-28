@@ -14,8 +14,8 @@ const context = {
   remainingByPosition: { RB: 20 },
   recentSales: [],
   teams: [
-    { teamId: "a", teamName: "Alpha", manager: "Alex", budgetRemaining: 180, rosterSlotsRemaining: 14, maxLegalBid: 166, roster: [] },
-    { teamId: "b", teamName: "Bravo", manager: "Blair", budgetRemaining: 150, rosterSlotsRemaining: 12, maxLegalBid: 139, roster: [] }
+    { teamId: "a", teamName: "Alpha", manager: "Alex", budgetRemaining: 180, rosterSlotsRemaining: 14, maxLegalBid: 166, suggestedValue: 44, roster: [] },
+    { teamId: "b", teamName: "Bravo", manager: "Blair", budgetRemaining: 150, rosterSlotsRemaining: 12, maxLegalBid: 139, suggestedValue: 17, roster: [] }
   ]
 };
 const fallbackDecisions = [
@@ -53,8 +53,11 @@ test("configured AI autodraft batches teams with strict structured output", asyn
   assert.deepEqual(request.body.text.format.schema.properties.decisions.items.properties.intent.enum, ["pass", "discount", "value", "target"]);
   assert.match(request.body.instructions, /committed \$1 opening bid by nomination\.nominatorTeamId/);
   assert.match(request.body.instructions, /must take the player for \$1 if nobody else bids/);
+  assert.match(request.body.instructions, /teams\[\]\.suggestedValue as that team's private roster utility/);
   assert.match(request.body.input, /"nominatorTeamId"/);
   assert.match(request.body.input, /"teamId":"a"/);
+  assert.match(request.body.input, /"suggestedValue":44/);
+  assert.match(request.body.input, /"suggestedValue":17/);
   assert.doesNotMatch(request.body.input, /marketAverage|marketProjected|aggressiveness|strategy/);
   assert.deepEqual(result, { decisions, provider: "openai", model: "gpt-test" });
 });

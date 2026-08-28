@@ -141,8 +141,8 @@ test("FLEX requirements accept an extra RB, WR, or TE after base slots", () => {
   assert.equal(canTeamRosterPlayer(draft, "a", "tight-end"), true);
 });
 
-test("standard auto rosters enforce exact position counts", () => {
-  const positions = ["QB", "QB", "RB", "RB", "RB", "RB", "WR", "WR", "WR", "WR", "TE", "TE", "K", "DST"];
+test("standard auto rosters combine exact position caps with skill-position minimums", () => {
+  const positions = ["QB", "QB", "RB", "RB", "RB", "WR", "WR", "WR", "WR", "TE", "K", "DST"];
   const rosterPlayers = positions.map((position, index) => ({
     id: `rostered-${index}`,
     name: `Rostered ${index}`,
@@ -151,7 +151,11 @@ test("standard auto rosters enforce exact position counts", () => {
   }));
   const candidates = [
     { id: "extra-qb", name: "Extra QB", position: "QB", status: "available" },
-    { id: "needed-wr", name: "Needed WR", position: "WR", status: "available" }
+    { id: "extra-k", name: "Extra K", position: "K", status: "available" },
+    { id: "extra-dst", name: "Extra DST", position: "DST", status: "available" },
+    { id: "extra-rb", name: "Extra RB", position: "RB", status: "available" },
+    { id: "extra-wr", name: "Extra WR", position: "WR", status: "available" },
+    { id: "extra-te", name: "Extra TE", position: "TE", status: "available" }
   ];
   const draft = createDraft({
     players: [...rosterPlayers, ...candidates],
@@ -167,7 +171,11 @@ test("standard auto rosters enforce exact position counts", () => {
   });
 
   assert.equal(canTeamRosterPlayer(draft, "auto", "extra-qb"), false);
-  assert.equal(canTeamRosterPlayer(draft, "auto", "needed-wr"), true);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-k"), false);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-dst"), false);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-rb"), true);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-wr"), true);
+  assert.equal(canTeamRosterPlayer(draft, "auto", "extra-te"), true);
 
   const humanDraft = createDraft({
     players: [...rosterPlayers, ...candidates],

@@ -1,5 +1,5 @@
 import { makeTeams, parseTeamSetupLines } from "./data.mjs";
-import { fantasyProsPlayers } from "./fantasy-pros-data.mjs";
+import { fantasyProsPlayers as bundledFantasyProsPlayers } from "./fantasy-pros-data.mjs";
 import { AuctioneerVoice } from "./auctioneer-voice.mjs";
 import { RemoteSpeechRelay } from "./remote-speech-relay.mjs";
 import {
@@ -52,6 +52,7 @@ import {
   normalizeCountdownSeconds
 } from "./domain.mjs";
 import {
+  applyPendingControllerChanges,
   autoBidDelayMs,
   autoTeamController,
   buildAutoIntentContext,
@@ -59,7 +60,8 @@ import {
   chooseAutoNomination,
   isAutoTeam,
   localAutoIntents,
-  normalizeAutoIntents
+  normalizeAutoIntents,
+  requestTeamControllerChange
 } from "./autodraft.mjs";
 
 const STORAGE_KEY = "gavel-draft-v1";
@@ -71,18 +73,30 @@ const SPEECH_PRIORITY = { patter: 20, nomination: 30, countdown: 50, bid: 100, r
 const STANDARD_ROSTER_REQUIREMENTS = { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1, K: 1, DST: 1 };
 const app = document.querySelector("#app");
 const hostToken = await loadHostSession();
+const autodraftValueProfileLoad = await loadAutodraftValueProfiles();
+const fantasyProsPlayers = autodraftValueProfileLoad.basePlayers.length
+  ? autodraftValueProfileLoad.basePlayers
+  : bundledFantasyProsPlayers;
+const autodraftValueProfiles = autodraftValueProfileLoad.profiles;
 const restoredRelaySession = await globalThis.sunGod?.relaySession?.get?.();
 const durableDraft = await loadDurableDraft();
 const legacyDraft = restoreDraft();
 const restoredDraftState = withoutMarketValues(restoreDraft(durableDraft.state) || legacyDraft);
 const replacedFictionalPlayers = hasFictionalPlayers(restoredDraftState);
+const replacedOutdatedBasePlayers = hasOutdatedBasePlayerPool(restoredDraftState);
 let draftRevision = durableDraft.revision || 0;
 let draftSavePromise = Promise.resolve();
 let durableSaveFailed = false;
 let emergencyLocked = false;
-let state = restoredDraftState && !replacedFictionalPlayers
+let state = restoredDraftState && !replacedFictionalPlayers && !replacedOutdatedBasePlayers
   ? restoredDraftState
   : createFantasyProsDraft(restoredDraftState);
+let restoredControllerChangesApplied = false;
+if (["idle", "sold", "passed"].includes(state.auction.phase)) {
+  const settledState = applyPendingControllerChanges(state);
+  restoredControllerChangesApplied = settledState !== state;
+  state = settledState;
+}
 let auctioneerProfile = restoreAuctioneerProfile();
 let voiceEnabled = auctioneerProfile.enabled;
 let recentRoasts = [];
@@ -101,9 +115,13 @@ let patterQueueKey = "";
 let patterRequest = null;
 let patterRequestSequence = 0;
 let recentPatterLines = [];
-let notice = replacedFictionalPlayers
-  ? { kind: "success", message: `Replaced the fictional player pool with ${fantasyProsPlayers.length} FantasyPros CSV players and values.` }
-  : null;
+let notice = autodraftValueProfileLoad.error
+  ? { kind: "error", message: autodraftValueProfileLoad.error }
+  : replacedFictionalPlayers
+    ? { kind: "success", message: `Replaced the fictional player pool with ${fantasyProsPlayers.length} players from data/player_values.csv.` }
+    : replacedOutdatedBasePlayers
+      ? { kind: "success", message: `Updated the unused base player pool to ${fantasyProsPlayers.length} players from data/player_values.csv.` }
+    : null;
 let pendingVisualTie = null;
 let visualBidWindow = null;
 let phoneRoomTransport = null;
@@ -158,7 +176,7 @@ wireGlobalEvents();
 if (globalThis.sunGod?.isDesktop && localStorage.getItem(PERSONAL_SETUP_STORAGE_KEY) !== "complete") {
   window.setTimeout(() => document.querySelector("#onboarding-dialog")?.showModal(), 0);
 }
-if (!durableDraft.state || replacedFictionalPlayers) persistDraft();
+if (!durableDraft.state || replacedFictionalPlayers || replacedOutdatedBasePlayers || restoredControllerChangesApplied) persistDraft();
 void auctioneerVoice.initialize(auctioneerProfile.provider);
 void initializeBiddingRoom();
 if (state.auction.phase === "ready") void prepareAutoIntents();
@@ -173,7 +191,9 @@ function render() {
   const lotNominator = state.teams.find((team) => team.id === state.auction.nominatorTeamId) || nextNominator;
   const participantNominator = ["ready", "open", "once", "twice"].includes(state.auction.phase) ? lotNominator : nextNominator;
   const available = state.players.filter((item) => item.status === "available");
-  const humanTeamCount = state.teams.filter((team) => !isAutoTeam(team)).length;
+  const claimableTeamCount = phoneRoom.mode === "remote"
+    ? state.teams.length
+    : state.teams.filter((team) => !isAutoTeam(team)).length;
   const nextPlayers = state.queue
     .map((id) => state.players.find((item) => item.id === id))
     .filter((item) => item?.status === "available" && item.id !== player?.id)
@@ -197,7 +217,7 @@ function render() {
         </div>
         <div class="device-controls">
           <button class="device-button ${emergencyLocked ? "is-on" : ""}" data-action="emergency-lock" title="Pause bidding and enable historical corrections">${emergencyLocked ? "UNLOCK" : "LOCK"}</button>
-          <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${humanTeamCount} phones</span></button>
+          <button class="device-button ${phoneRoom.status === "live" ? "is-on" : ""}" data-action="focus-phone-room" title="Show phone bidding room">${icon("phone")} <span>${phoneRoom.claimedTeamIds.length}/${claimableTeamCount} phones</span></button>
           ${globalThis.sunGod?.diagnostics ? `<button class="icon-button" data-action="export-diagnostics" title="Export redacted diagnostics">${icon("database")}</button>` : ""}
           ${globalThis.sunGod?.isDesktop ? `<button class="icon-button" data-action="personal-settings" title="Personal relay and provider settings">${icon("key")}</button>` : ""}
           <button class="icon-button ${voiceEnabled ? "is-on" : ""}" data-action="audio-settings" title="${escapeHtml(auctioneerVoiceTitle())}">${icon("volume")}</button>
@@ -243,7 +263,7 @@ function render() {
               ${nextPlayers.length ? nextPlayers.map((item, index) => queueRow(item, index)).join("") : `<p class="empty-copy">No players left in the queue.</p>`}
             </div>
             <div class="queue-actions">
-              <button class="fantasy-pros-button" data-action="load-fantasy-pros" title="Replace the current draft with the supplied FantasyPros CSV players and auction values">
+              <button class="fantasy-pros-button" data-action="load-fantasy-pros" title="Replace the current draft with the players and values from data/player_values.csv">
                 ${icon("database")}
                 <span><strong>Reload player values</strong><small>${fantasyProsPlayers.length} players · resets draft</small></span>
                 ${icon("arrow")}
@@ -274,15 +294,16 @@ function render() {
         <section class="participants-panel panel">
           <div class="participants-heading">
             <div><span class="eyebrow">PARTICIPANTS</span><h2>Managers</h2></div>
-            <strong class="participants-count">${phoneRoom.claimedTeamIds.length}/${humanTeamCount}</strong>
+            <strong class="participants-count">${phoneRoom.claimedTeamIds.length}/${claimableTeamCount}</strong>
           </div>
           <div class="phone-claim-grid">
             ${state.teams.map((team) => {
               const joined = phoneRoom.claimedTeamIds.includes(team.id);
               const automatic = isAutoTeam(team);
+              const valueProfile = autodraftValueProfileForTeam(team);
               const nominating = team.id === participantNominator?.id;
-              const status = nominating ? "NOMINATING" : automatic ? "AUTO" : joined ? "READY" : "WAIT";
-              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""} ${nominating ? "is-nominator" : ""}" title="${escapeHtml(team.name)} · ${nominating ? "Currently nominating" : automatic ? "Auto draft" : joined ? "Phone ready" : "Waiting for phone"}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${status}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
+              const status = nominating ? "NOMINATING" : automatic ? valueProfile ? "AUTO · CUSTOM" : "AUTO" : joined ? "READY" : "WAIT";
+              return `<div class="phone-claim ${joined || automatic ? "is-joined" : ""} ${automatic ? "is-auto" : ""} ${nominating ? "is-nominator" : ""}" title="${escapeHtml(team.name)} · ${nominating ? "Currently nominating" : automatic ? valueProfile ? `Auto draft · ${valueProfile.manager} values` : "Auto draft" : joined ? "Phone ready" : "Waiting for phone"}"><i style="background:${team.color}"></i><span><strong>${escapeHtml(team.manager)}</strong><small>${status}</small></span>${icon(automatic ? "settings" : joined ? "check" : "phone")}</div>`;
             }).join("")}
           </div>
         </section>
@@ -417,7 +438,7 @@ function setupDialog() {
       </fieldset>
     </section>
     <section class="setup-step ${setupStep === 2 ? "is-active" : ""}" data-setup-step="2">
-      <p>Set minimum position slots for human teams. Standard 15-player autobidders are fixed at 2 QB, 4 RB, 5 WR, 2 TE, 1 K, and 1 DST.</p>
+      <p>Set minimum position slots for human teams. Standard 15-player autobidders draft exactly 2 QB, at least 3 RB, at least 4 WR, at least 1 TE, exactly 1 K, and exactly 1 DST. Remaining slots may be RB, WR, or TE.</p>
       <div class="position-requirements">
         ${ROSTER_POSITIONS.map((position) => `<label><span>${position}</span><input name="position_${position}" type="number" min="0" max="10" value="${requirements[position]}" required /></label>`).join("")}
         <label class="bench-position"><span>BENCH</span><input name="benchSlots" type="number" min="0" max="20" value="${benchSlots}" required /></label>
@@ -427,11 +448,12 @@ function setupDialog() {
     <section class="setup-step ${setupStep === 3 ? "is-active" : ""}" data-setup-step="3">
       <p>Enter one team per line as <strong>Team name | Manager</strong>. This top-to-bottom list is the repeating nomination order.</p>
       <label class="team-name-field">Teams, managers, and order<textarea name="teamNames" rows="${Math.min(12, Math.max(4, state.teams.length))}" required>${escapeHtml(orderedTeams.map((team) => `${team.name} | ${team.manager}`).join("\n"))}</textarea></label>
-      <fieldset class="autodraft-team-fieldset"><legend>AUTO DRAFT CONTROL</legend><p>Marked teams cannot be claimed by a phone. AI chooses pass, discount, value, or target once per nomination; local rules place every bid.</p>
+      <fieldset class="autodraft-team-fieldset"><legend>AUTO DRAFT CONTROL</legend><p>Marked teams cannot be claimed by a LAN phone. Remote managers can take control later. Custom values are loaded for ${escapeHtml(autodraftValueProfiles.map((profile) => profile.manager).join(" and "))}.</p>
         <div class="autodraft-team-grid">
           ${Array.from({ length: 12 }, (_, index) => {
             const team = orderedTeams[index];
-            return `<label data-auto-team-slot="${index}" ${index >= state.teams.length ? "hidden" : ""}><input type="checkbox" name="autoTeam_${index}" ${isAutoTeam(team) ? "checked" : ""} /><i></i><span><strong data-auto-team-label>${escapeHtml(team?.manager || `Manager ${index + 1}`)}</strong><small>${escapeHtml(team?.name || `Team ${index + 1}`)}</small></span><b>AUTO</b></label>`;
+            const valueProfile = autodraftValueProfileForTeam(team);
+            return `<label data-auto-team-slot="${index}" ${index >= state.teams.length ? "hidden" : ""}><input type="checkbox" name="autoTeam_${index}" ${isAutoTeam(team) ? "checked" : ""} /><i></i><span><strong data-auto-team-label>${escapeHtml(team?.manager || `Manager ${index + 1}`)}</strong><small>${escapeHtml(team?.name || `Team ${index + 1}`)}</small></span><b>${valueProfile ? "AUTO · CUSTOM" : "AUTO"}</b></label>`;
           }).join("")}
         </div>
       </fieldset>
@@ -694,7 +716,7 @@ function wireGlobalEvents() {
         pendingCsvImport = null;
         state = createDraft({
           players: imported,
-          teams: state.teams.map((team) => ({ ...team, roster: [] })),
+          teams: state.teams.map((team) => ({ ...team, roster: [], pendingControllerType: null })),
           budget: state.config.budget,
           rosterSize: state.config.rosterSize,
           increment: state.config.increment,
@@ -778,6 +800,7 @@ async function selectNomination(playerId) {
   clearTimer();
   clearAutoDraftTimer();
   autoIntentRequestSequence += 1;
+  state = applyPendingControllerChanges(state);
   update(nominatePlayer(state, playerId));
   return await prepareAutoIntents();
 }
@@ -786,13 +809,14 @@ async function selectNextQueuedPlayer() {
   clearTimer();
   clearAutoDraftTimer();
   autoIntentRequestSequence += 1;
+  state = applyPendingControllerChanges(state);
   update(moveToNextPlayer(state));
   return await prepareAutoIntents();
 }
 
 async function prepareAutoIntents() {
   if (state.auction.phase !== "ready" || !state.auction.playerId) return;
-  const fallback = localAutoIntents(state);
+  const fallback = localAutoIntents(state, state.auction.playerId, autodraftValueProfiles);
   const teamIds = Object.keys(fallback);
   state = {
     ...state,
@@ -813,7 +837,7 @@ async function prepareAutoIntents() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        context: buildAutoIntentContext(state),
+        context: buildAutoIntentContext(state, autodraftValueProfiles),
         fallbackDecisions: Object.entries(fallback).map(([teamId, decision]) => ({ teamId, intent: decision.intent, reason: decision.reason }))
       })
     });
@@ -824,7 +848,7 @@ async function prepareAutoIntents() {
       ...state,
       auction: {
         ...state.auction,
-        autoIntents: normalizeAutoIntents(state, payload.decisions, { provider: payload.provider, model: payload.model }),
+        autoIntents: normalizeAutoIntents(state, payload.decisions, { provider: payload.provider, model: payload.model, valueProfiles: autodraftValueProfiles }),
         autoIntentStatus: "ready"
       }
     };
@@ -845,7 +869,7 @@ function freezeLocalAutoIntents() {
     ...state,
     auction: {
       ...state.auction,
-      autoIntents: localAutoIntents(state),
+      autoIntents: localAutoIntents(state, state.auction.playerId, autodraftValueProfiles),
       autoIntentStatus: "ready"
     }
   };
@@ -854,7 +878,7 @@ function freezeLocalAutoIntents() {
 function scheduleAutoDraftBid() {
   clearAutoDraftTimer();
   if (pendingVisualTie || visualBidWindow) return;
-  const decision = chooseAutoBid(state);
+  const decision = chooseAutoBid(state, null, autodraftValueProfiles);
   if (!decision) return;
   const countdownWindowMs = countdownDelayMs(state.config, state.auction.phase);
   const latestSafeBidMs = Math.max(250, countdownWindowMs - 250);
@@ -862,7 +886,7 @@ function scheduleAutoDraftBid() {
   autoDraftTimer = window.setTimeout(() => {
     autoDraftTimer = null;
     if (pendingVisualTie || visualBidWindow) return resumeAuctionFlow();
-    const latest = chooseAutoBid(state);
+    const latest = chooseAutoBid(state, null, autodraftValueProfiles);
     if (!latest) return;
     try { submitBid(latest.teamId, latest.amount, { source: "auto" }); }
     catch { resumeAuctionFlow(); }
@@ -874,7 +898,7 @@ function scheduleAutoNomination() {
   if (!["idle", "sold", "passed"].includes(state.auction.phase)) return;
   const nominator = currentNominator(state);
   if (!nominator || !isAutoTeam(nominator)) return;
-  const playerId = chooseAutoNomination(state, nominator.id);
+  const playerId = chooseAutoNomination(state, nominator.id, autodraftValueProfiles);
   if (!playerId) return;
   autoDraftTimer = window.setTimeout(async () => {
     autoDraftTimer = null;
@@ -937,6 +961,7 @@ function runCountdownStep(force = false) {
   clearAutoDraftTimer();
   clearPatter();
   state = advanceCountdown(state);
+  if (["sold", "passed"].includes(state.auction.phase)) state = applyPendingControllerChanges(state);
   persistDraft();
   render();
   if (state.auction.phase === "once") {
@@ -1274,6 +1299,10 @@ function stopAuctioneer() {
 function handlePhoneBid(bid) {
   if (!bid?.teamId) return;
   const amount = bid.bidMode === "next" ? nextVisualBidAmount(state) : Number(bid.amount);
+  if (isAutoTeam(state.teams.find((team) => team.id === bid.teamId))) {
+    if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount, status: "rejected" });
+    return;
+  }
   if (!["open", "once", "twice"].includes(state.auction.phase)) {
     if (phoneRoom.mode === "remote") phoneRoomTransport?.notify?.("bid.result", { teamId: bid.teamId, participantMessageId: bid.participantMessageId, amount, status: "rejected" });
     return;
@@ -1284,6 +1313,40 @@ function handlePhoneBid(bid) {
   }
   if (visualBidWindow && !bidsShareWindow(visualBidWindow.openedAt, bid.receivedAt)) resolveVisualBidWindow();
   collectExternalBids([{ teamId: bid.teamId, amount, messageId: bid.participantMessageId || bid.id }], "phone", bid.receivedAt);
+}
+
+async function handleAutodraftRequest(request) {
+  const team = state.teams.find((item) => item.id === request?.teamId);
+  if (phoneRoom.mode !== "remote") return;
+  const reject = (error) => phoneRoomTransport?.notify?.("autodraft.result", {
+    teamId: request?.teamId,
+    participantMessageId: request?.participantMessageId,
+    enabled: request?.enabled === true,
+    effective: "now",
+    status: "rejected",
+    error
+  });
+  if (!team) return reject("That team is no longer part of this draft.");
+  try {
+    const previousType = isAutoTeam(team) ? "auto" : "human";
+    const result = requestTeamControllerChange(state, team.id, request.enabled === true ? "auto" : "human");
+    const activeControllerChanged = result.activeType !== previousType;
+    if (activeControllerChanged) clearAutoDraftTimer();
+    state = result.state;
+    persistDraft();
+    render();
+    await syncPhoneRoomState();
+    phoneRoomTransport?.notify?.("autodraft.result", {
+      teamId: team.id,
+      participantMessageId: request.participantMessageId,
+      enabled: request.enabled === true,
+      effective: result.effective,
+      status: "accepted"
+    });
+    if (activeControllerChanged) scheduleAutoNomination();
+  } catch (error) {
+    reject(error.message);
+  }
 }
 
 function collectExternalBids(bids, source, receivedAt = Date.now()) {
@@ -1451,6 +1514,7 @@ async function initializeRelayRoom() {
       const claimed = new Set(message.claims || []);
       applyPhoneRoomSnapshot({ ...message.room, teams: (message.room?.teams || []).map((team) => ({ ...team, claimed: claimed.has(team.id) })) }, { renderIfChanged: true });
     } else if (message.type === "bid.proposed") handlePhoneBid(message);
+    else if (message.type === "autodraft.proposed") void handleAutodraftRequest(message);
     else if (message.type === "heartbeat.ack" && message.sentAt) {
       phoneRoom.latencyMs = Date.now() - Number(message.sentAt);
       render();
@@ -1597,6 +1661,7 @@ async function syncPhoneRoomState() {
       },
       teams: state.teams.map((team) => ({
         id: team.id, name: team.name, manager: team.manager, color: team.color, autoDraft: isAutoTeam(team),
+        pendingAutoDraft: team.pendingControllerType === "auto" ? true : team.pendingControllerType === "human" ? false : null,
         budget: team.budget, rosterCount: team.roster.length, rosterSize: state.config.rosterSize,
         eligibleForPlayer: !player || canTeamRosterPlayer(state, team.id, player.id), maxBid: maxBidForTeam(state, team.id),
         roster: team.roster.map((spot) => {
@@ -1677,7 +1742,7 @@ function loadFantasyProsPreset() {
   persistDraft();
   render();
   scheduleAutoNomination();
-  showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} FantasyPros CSV players and values. The draft is ready.` });
+  showNotice({ kind: "success", message: `Loaded ${fantasyProsPlayers.length} players and values from data/player_values.csv. The draft is ready.` });
 }
 
 function createFantasyProsDraft(baseState = null) {
@@ -1685,7 +1750,7 @@ function createFantasyProsDraft(baseState = null) {
   const teams = baseState?.teams?.length ? baseState.teams : makeTeams();
   return createDraft({
     players: fantasyProsPlayers,
-    teams: teams.map((team) => ({ ...team, roster: [] })),
+    teams: teams.map((team) => ({ ...team, roster: [], pendingControllerType: null })),
     budget: config.budget ?? 200,
     rosterSize: config.rosterSize ?? 15,
     increment: config.increment ?? 1,
@@ -1698,6 +1763,14 @@ function createFantasyProsDraft(baseState = null) {
 
 function hasFictionalPlayers(draft) {
   return Boolean(draft?.players?.some((player) => String(player?.id || "").startsWith("demo-")));
+}
+
+function hasOutdatedBasePlayerPool(draft) {
+  if (!draft?.players?.length || draft.auction?.phase !== "idle" || draft.sales?.length) return false;
+  if (draft.teams?.some((team) => team.roster?.length)) return false;
+  if (!draft.players.every((player) => String(player?.id || "").startsWith("fantasy-pros-"))) return false;
+  const signature = (players) => players.map((player) => `${player.name}|${player.position}|${Number(player.suggestedValue) || 0}`).join("\n");
+  return signature(draft.players) !== signature(fantasyProsPlayers);
 }
 
 function withoutMarketValues(draft) {
@@ -1873,7 +1946,11 @@ function restoreDraft(source = undefined) {
       countdownOnceSeconds: normalizeCountdownSeconds(restored.config?.countdownOnceSeconds, DEFAULT_COUNTDOWN_SECONDS.once),
       countdownTwiceSeconds: normalizeCountdownSeconds(restored.config?.countdownTwiceSeconds, DEFAULT_COUNTDOWN_SECONDS.twice)
     };
-    restored.teams = (restored.teams || []).map((team) => ({ ...team, controller: autoTeamController(team.controller) }));
+    restored.teams = (restored.teams || []).map((team) => ({
+      ...team,
+      controller: autoTeamController(team.controller),
+      pendingControllerType: ["human", "auto"].includes(team.pendingControllerType) ? team.pendingControllerType : null
+    }));
     restored.nomination ||= { order: restored.teams.map((team) => team.id), currentIndex: 0 };
     restored.auction = { nominatorTeamId: null, autoIntents: {}, autoIntentStatus: "idle", ...restored.auction };
     validateDraftState(restored);
@@ -1909,6 +1986,39 @@ async function loadDurableDraft() {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Durable draft storage is unavailable.");
   return payload;
+}
+
+async function loadAutodraftValueProfiles() {
+  try {
+    const response = await hostFetch("/api/autodraft/value-profiles");
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Custom autodraft values could not be loaded.");
+    const allowedPositions = new Set(["QB", "RB", "WR", "TE", "K", "DST"]);
+    const basePlayers = Array.isArray(payload.basePlayers) ? payload.basePlayers : [];
+    if (!basePlayers.length || basePlayers.some((player) => !player?.id || !player?.name || !allowedPositions.has(player.position) || !Number.isFinite(Number(player.suggestedValue)) || Number(player.suggestedValue) < 0)) {
+      throw new Error("The canonical base player pool is invalid.");
+    }
+    const baseIds = new Set(basePlayers.map((player) => player.id));
+    if (baseIds.size !== basePlayers.length) throw new Error("The canonical base player pool contains duplicate IDs.");
+    const profiles = Array.isArray(payload.profiles) ? payload.profiles.filter((profile) => {
+      const valueIds = Object.keys(profile?.values || {});
+      return profile?.id && profile?.managerKey && valueIds.length === baseIds.size && valueIds.every((id) => baseIds.has(id));
+    }) : [];
+    if (profiles.length !== 2) throw new Error("Both custom autodraft value profiles must cover the complete base player universe.");
+    return { basePlayers, profiles, error: null };
+  } catch (error) {
+    return { basePlayers: [], profiles: [], error: `${error.message} The bundled base snapshot will be used, and Alex Gerszten and Yuvi Bermel will use base values until this is fixed.` };
+  }
+}
+
+function autodraftValueProfileForTeam(team) {
+  const managerKey = String(team?.manager || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv)\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+  return autodraftValueProfiles.find((profile) => profile.managerKey === managerKey) || null;
 }
 
 function hostFetch(input, init = {}) {

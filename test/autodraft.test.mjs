@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDraft, nominatePlayer, openAuction, placeBid, maxBidForTeam } from "../src/domain.mjs";
 import {
+  applyPendingControllerChanges,
+  autoDraftSuggestedValue,
   buildAutoIntentContext,
   autoBidDelayMs,
   calculateAutoBidCeiling,
@@ -9,6 +11,7 @@ import {
   chooseAutoNomination,
   localAutoIntent,
   normalizeAutoIntents,
+  requestTeamControllerChange,
   sampledAutoBidValue
 } from "../src/autodraft.mjs";
 
@@ -36,6 +39,11 @@ function draft() {
     rosterRequirements: { RB: 1, WR: 1, K: 1 }
   });
 }
+
+const customValueProfiles = [
+  { managerKey: "managera", values: { runner: 1, receiver: 50 } },
+  { managerKey: "managerb", values: { runner: 60, receiver: 2 } }
+];
 
 test("local strategy targets missing requirements and saves kicker for later", () => {
   const state = draft();
@@ -70,8 +78,8 @@ test("intent maximums use noisy suggested-value distributions", () => {
   assert.equal(sampledAutoBidValue(100, "discount", 0), 90);
   assert.equal(sampledAutoBidValue(100, "value", 0), 100);
   assert.equal(sampledAutoBidValue(100, "target", 0), 105);
-  assert.equal(sampledAutoBidValue(100, "value", 1), 105);
-  assert.equal(sampledAutoBidValue(100, "value", -1), 95);
+  assert.equal(sampledAutoBidValue(100, "value", 1), 101);
+  assert.equal(sampledAutoBidValue(100, "value", -1), 99);
 });
 
 test("sampled maximums are stable and respect the legal roster reserve", () => {
@@ -181,4 +189,110 @@ test("auto nomination and model context reflect the current team construction", 
   assert.equal(context.teams.length, 2);
   assert.equal(context.teams[0].rosterSlotsRemaining, 6);
   assert.equal(context.remainingByPosition.RB, 1);
+});
+
+test("manager-specific values drive ceilings, nominations, and model context with base fallback", () => {
+  const state = draft();
+  assert.equal(autoDraftSuggestedValue(state, "a", "runner", customValueProfiles), 1);
+  assert.equal(autoDraftSuggestedValue(state, "b", "runner", customValueProfiles), 60);
+  assert.equal(autoDraftSuggestedValue(state, "a", "kicker", customValueProfiles), 2);
+  assert.ok(
+    calculateAutoBidCeiling(state, "b", "runner", "value", customValueProfiles)
+      > calculateAutoBidCeiling(state, "a", "runner", "value", customValueProfiles)
+  );
+  assert.equal(chooseAutoNomination(state, "a", customValueProfiles), "receiver");
+  assert.equal(chooseAutoNomination(state, "b", customValueProfiles), "runner");
+
+  const context = buildAutoIntentContext(nominatePlayer(state, "runner"), customValueProfiles);
+  assert.equal(context.player.suggestedValue, 30);
+  assert.equal(context.teams.find((team) => team.teamId === "a").suggestedValue, 1);
+  assert.equal(context.teams.find((team) => team.teamId === "b").suggestedValue, 60);
+});
+
+test("standard auto context identifies minimums and exact position maximums", () => {
+  const state = createDraft({
+    players,
+    teams: [auto("a"), auto("b")],
+    budget: 200,
+    rosterSize: 15
+  });
+  const context = buildAutoIntentContext(nominatePlayer(state, "runner"));
+  assert.deepEqual(context.league.rosterRequirements, { QB: 2, RB: 3, WR: 4, TE: 1, FLEX: 0, K: 1, DST: 1 });
+  assert.deepEqual(context.league.rosterMaximums, { QB: 2, K: 1, DST: 1 });
+});
+
+test("phone controller changes apply between lots and queue during the current nomination", () => {
+  let state = requestTeamControllerChange(draft(), "a", "human").state;
+  assert.equal(state.teams[0].controller.type, "human");
+  assert.equal(state.teams[0].pendingControllerType, null);
+
+  state = nominatePlayer(state, "runner");
+  const queued = requestTeamControllerChange(state, "a", "auto");
+  assert.equal(queued.effective, "next_nomination");
+  assert.equal(queued.state.teams[0].controller.type, "human");
+  assert.equal(queued.state.teams[0].pendingControllerType, "auto");
+
+  const stillQueued = applyPendingControllerChanges(queued.state);
+  assert.equal(stillQueued.teams[0].controller.type, "human");
+  const committed = applyPendingControllerChanges({ ...queued.state, auction: { ...queued.state.auction, phase: "sold" } });
+  assert.equal(committed.teams[0].controller.type, "auto");
+  assert.equal(committed.teams[0].pendingControllerType, null);
+});
+
+test("requesting the active controller cancels a queued phone handoff", () => {
+  let state = requestTeamControllerChange(draft(), "a", "human").state;
+  state = nominatePlayer(state, "runner");
+  state = requestTeamControllerChange(state, "a", "auto").state;
+  const canceled = requestTeamControllerChange(state, "a", "human");
+  assert.equal(canceled.effective, "now");
+  assert.equal(canceled.state.teams[0].controller.type, "human");
+  assert.equal(canceled.state.teams[0].pendingControllerType, null);
+});
+
+test("queued phone handoffs preserve the current bidder and commit after sold or passed", () => {
+  let autoToHuman = openAuction(nominatePlayer(draft(), "runner"));
+  const queuedHuman = requestTeamControllerChange(autoToHuman, "b", "human");
+  assert.equal(queuedHuman.effective, "next_nomination");
+  assert.equal(queuedHuman.state.teams[1].controller.type, "auto");
+  assert.equal(queuedHuman.state.teams[1].pendingControllerType, "human");
+  assert.equal(chooseAutoBid(queuedHuman.state, { b: 20 }).teamId, "b");
+
+  const humanAfterSale = applyPendingControllerChanges({
+    ...queuedHuman.state,
+    auction: { ...queuedHuman.state.auction, phase: "sold" }
+  });
+  assert.equal(humanAfterSale.teams[1].controller.type, "human");
+  assert.equal(humanAfterSale.teams[1].pendingControllerType, null);
+
+  let humanToAuto = requestTeamControllerChange(draft(), "b", "human").state;
+  humanToAuto = openAuction(nominatePlayer(humanToAuto, "runner"));
+  const queuedAuto = requestTeamControllerChange(humanToAuto, "b", "auto");
+  assert.equal(queuedAuto.effective, "next_nomination");
+  assert.equal(queuedAuto.state.teams[1].controller.type, "human");
+  assert.equal(queuedAuto.state.teams[1].pendingControllerType, "auto");
+  assert.equal(chooseAutoBid(queuedAuto.state, { b: 20 }), null);
+
+  const autoAfterPass = applyPendingControllerChanges({
+    ...queuedAuto.state,
+    auction: { ...queuedAuto.state.auction, phase: "passed" }
+  });
+  assert.equal(autoAfterPass.teams[1].controller.type, "auto");
+  assert.equal(autoAfterPass.teams[1].pendingControllerType, null);
+  const nextLot = { ...autoAfterPass, auction: { ...queuedAuto.state.auction, phase: "open" } };
+  assert.equal(chooseAutoBid(nextLot, { b: 20 }).teamId, "b");
+});
+
+test("phone handoffs remain queued throughout every active lot phase", () => {
+  for (const phase of ["ready", "open", "once", "twice", "paused"]) {
+    const manual = requestTeamControllerChange(draft(), "b", "human").state;
+    const activeLot = {
+      ...manual,
+      auction: { ...manual.auction, playerId: "runner", phase, nominatorTeamId: "a", highBidderId: "a", amount: 1 }
+    };
+    const queued = requestTeamControllerChange(activeLot, "b", "auto");
+    assert.equal(queued.effective, "next_nomination", phase);
+    assert.equal(queued.state.teams[1].controller.type, "human", phase);
+    assert.equal(queued.state.teams[1].pendingControllerType, "auto", phase);
+    assert.equal(applyPendingControllerChanges(queued.state).teams[1].controller.type, "human", phase);
+  }
 });

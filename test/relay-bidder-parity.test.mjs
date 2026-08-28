@@ -37,6 +37,11 @@ test("remote bidder exposes auction, roster, and completed-auction history views
   assert.match(client, /bidMode = requestedAmount == null \? "next" : "custom"/);
   assert.match(client, /claim a team before bidding/);
   assert.match(client, /await roomTransport\.claimTeam\(\{ teamId: selectedTeamId, participantToken \}\)/);
+  assert.match(client, /roomTransport\.setAutodraft/);
+  assert.match(client, /data-action="open-autodraft-confirmation"/);
+  assert.match(client, /class="phone-draft-control/);
+  assert.match(client, /class="phone-confirmation-sheet"/);
+  assert.match(client, /team\.pendingAutoDraft/);
   assert.match(client, /RemotePhoneAudio/);
   assert.match(client, /data-action="toggle-sound"/);
   assert.match(client, /class="easy-bid-grid"/);
@@ -50,6 +55,8 @@ test("remote bidder exposes auction, roster, and completed-auction history views
   assert.doesNotMatch(localClient, /data-tab="history"/);
   assert.match(hostClient, /history: buildPhoneAuctionHistory\(state\)/);
   assert.match(hostClient, /countdownEndsAt:/);
+  assert.match(hostClient, /pendingAutoDraft:/);
+  assert.match(hostClient, /autodraft\.proposed/);
   assert.match(hostClient, /bid\.bidMode === "next" \? nextVisualBidAmount\(state\)/);
   for (const bidderClient of [localClient, client]) {
     assert.match(bidderClient, /class="phone-bid-holder"/);

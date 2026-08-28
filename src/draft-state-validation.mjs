@@ -36,6 +36,7 @@ export function validateDraftState(state) {
     requireText(team?.manager, 100, "manager name");
     if (!/^#[0-9a-f]{6}$/i.test(team?.color)) throw invalid("A team color is invalid.");
     requireInteger(team?.budget, 0, 100_000, "team budget");
+    if (team?.pendingControllerType != null && !["human", "auto"].includes(team.pendingControllerType)) throw invalid("A pending team controller is invalid.");
     if (!Array.isArray(team?.roster) || team.roster.length > config.rosterSize) throw invalid("A team roster is invalid.");
     for (const spot of team.roster) {
       if (!playerIds.has(spot?.playerId)) throw invalid("A roster references an unknown player.");

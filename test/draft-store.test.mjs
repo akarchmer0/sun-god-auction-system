@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { DraftStore } from "../src/draft-store.mjs";
 import { createDraft } from "../src/domain.mjs";
 import { makeTeams } from "../src/data.mjs";
-import { fantasyProsPlayers } from "../src/fantasy-pros-data.mjs";
+import { fantasyProsPlayersFromCsv } from "../src/fantasy-pros-data.mjs";
+
+const fantasyProsPlayers = fantasyProsPlayersFromCsv(await readFile(new URL("../data/player_values.csv", import.meta.url), "utf8"));
 
 function sampleDraft() {
   return createDraft({ players: fantasyProsPlayers.slice(0, 4), teams: makeTeams(2), rosterSize: 2, rosterRequirements: { WR: 1 } });

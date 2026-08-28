@@ -17,9 +17,17 @@ import { SpeechAudioCache, countdownCacheKey } from "./src/speech-cache.mjs";
 import { OpenAIRoastService } from "./src/openai-roast-service.mjs";
 import { OpenAIPatterService } from "./src/openai-patter-service.mjs";
 import { OpenAIAutodraftService } from "./src/openai-autodraft-service.mjs";
+import { fantasyProsPlayersFromCsv } from "./src/fantasy-pros-data.mjs";
+import { AUTODRAFT_VALUE_PROFILE_SOURCES, buildAutodraftValueProfile } from "./src/autodraft-value-profiles.mjs";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 loadLocalEnv(root);
+const fantasyProsPlayers = fantasyProsPlayersFromCsv(await readFile(join(root, "data", "player_values.csv"), "utf8"));
+const autodraftValueProfiles = await Promise.all(AUTODRAFT_VALUE_PROFILE_SOURCES.map(async (source) => buildAutodraftValueProfile({
+  ...source,
+  csvText: await readFile(join(root, "data", "auto-draft-values", source.fileName), "utf8"),
+  basePlayers: fantasyProsPlayers
+})));
 const port = Number(process.env.PORT || 4173);
 const hostToken = process.env.SUN_GOD_HOST_TOKEN || randomBytes(32).toString("base64url");
 const dataDirectory = process.env.SUN_GOD_DATA_DIR || join(homedir(), "Library", "Application Support", "Sun God Auctioneer");
@@ -75,6 +83,7 @@ const publicAssets = new Map([
 const hostOnlyRoutes = new Set([
   "/api/auctioneer/status", "/api/auctioneer/speech", "/api/auctioneer/roast",
   "/api/auctioneer/patter", "/api/autodraft/intent", "/api/phone-room/upsert",
+  "/api/autodraft/value-profiles",
   "/api/phone-room/reset-claims", "/api/phone-room/state", "/api/draft-state",
   "/api/draft-backup", "/api/draft-backup/import", "/api/relay-room"
 ]);
@@ -152,6 +161,9 @@ const server = createServer(async (request, response) => {
         fallbackDecisions: payload?.fallbackDecisions
       });
       return sendJson(response, 200, result);
+    }
+    if (request.method === "GET" && url.pathname === "/api/autodraft/value-profiles") {
+      return sendJson(response, 200, { basePlayers: fantasyProsPlayers, profiles: autodraftValueProfiles });
     }
     if (request.method === "GET" && url.pathname === "/api/phone-room") {
       const room = phoneRoomHub.snapshot(url.searchParams.get("room"));

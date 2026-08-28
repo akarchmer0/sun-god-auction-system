@@ -31,8 +31,18 @@ test("server allowlists public assets and authenticates commissioner APIs", asyn
 
   const denied = await fetch(`${base}/api/auctioneer/status`);
   assert.equal(denied.status, 401);
+  const deniedValueProfiles = await fetch(`${base}/api/autodraft/value-profiles`);
+  assert.equal(deniedValueProfiles.status, 401);
   const allowed = await fetch(`${base}/api/auctioneer/status`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(allowed.status, 200);
+  const allowedValueProfiles = await fetch(`${base}/api/autodraft/value-profiles`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(allowedValueProfiles.status, 200);
+  const valueProfilePayload = await allowedValueProfiles.json();
+  assert.equal(valueProfilePayload.basePlayers.length, 340);
+  assert.ok(valueProfilePayload.basePlayers.some((player) => player.name === "Stefon Diggs" && player.suggestedValue === 3));
+  assert.ok(valueProfilePayload.basePlayers.some((player) => player.name === "Deebo Samuel Sr." && player.suggestedValue === 3));
+  assert.deepEqual(valueProfilePayload.profiles.map((profile) => profile.manager), ["Alex Gerszten", "Yuvi Bermel"]);
+  assert.ok(valueProfilePayload.profiles.every((profile) => Object.keys(profile.values).length === 340));
   const session = await fetch(`${base}/api/host-session`, { method: "POST" });
   assert.deepEqual(await session.json(), { token });
 
